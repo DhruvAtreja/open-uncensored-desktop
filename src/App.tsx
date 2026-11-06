@@ -397,12 +397,6 @@ function useAutoScroll(dep: unknown) {
 
 type Update = (id: string, fn: (c: Conversation) => Conversation) => void;
 
-const SUGGESTIONS = [
-  "What's in this folder? Give me a quick tour.",
-  "Write a Python script that renames photos by the date they were taken.",
-  "Find bugs in this project and fix the worst one.",
-  "Explain how abliteration removes refusals from a model.",
-];
 
 function AgentView({
   convo,
@@ -558,17 +552,6 @@ function AgentView({
             <div className="mt-[12vh] text-center">
               <p className="text-[20px] font-semibold tracking-tight">How can I help?</p>
               <p className="mt-1.5 text-[13px] text-fg-3">Working in {convo.folder}</p>
-              <div className="mx-auto mt-7 grid max-w-[560px] grid-cols-2 gap-2.5 text-left">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setDraft(s)}
-                    className="rounded-xl border border-white/[0.08] bg-white/[0.02] px-3.5 py-3 text-left text-[12.5px] leading-snug text-fg-2 transition-colors hover:border-white/15 hover:bg-white/[0.05] hover:text-fg"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
             </div>
           )}
           {convo.turns.map((t, i) =>

@@ -1,18 +1,19 @@
 @import "tailwindcss";
 
 @theme {
-  --color-ink: #02070a;
-  --color-ink-2: #050d12;
-  --color-ink-3: #09151c;
-  --color-ink-4: #0e1d26;
-  --color-line: rgb(255 255 255 / 0.08);
-  --color-fg: #eaf2f6;
-  --color-fg-2: #a3b5bf;
-  --color-fg-3: #6a7c86;
-  --color-orange: #fc734d;
-  --color-blue: #0297de;
-  --color-ok: #3fd18b;
-  --color-bad: #f0566a;
+  /* Neutral dark theme matching Claude's desktop app (sampled from it). */
+  --color-ink: #181818; /* main pane */
+  --color-ink-2: #202224; /* sidebar */
+  --color-ink-3: #262626; /* message bubbles, code, cards */
+  --color-ink-4: #303030; /* composer, raised controls */
+  --color-line: rgb(255 255 255 / 0.09);
+  --color-fg: #e5e5e5;
+  --color-fg-2: #b0b0b0;
+  --color-fg-3: #8e8e8e;
+  --color-orange: #d97757;
+  --color-blue: #7aa7e0;
+  --color-ok: #6fbf8e;
+  --color-bad: #e06c75;
 }
 
 html,
@@ -24,7 +25,9 @@ body {
   margin: 0;
   background: var(--color-ink);
   color: var(--color-fg);
-  font-family: ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  font-size: 14px;
+  letter-spacing: -0.003em;
   -webkit-font-smoothing: antialiased;
 }
 .drag {
@@ -52,7 +55,7 @@ body {
   padding-left: 1.3em;
 }
 .md code {
-  font-family: ui-monospace, "SF Mono", monospace;
+  font-family: "SF Mono", ui-monospace, Menlo, Monaco, monospace;
   font-size: 0.88em;
   background: rgb(255 255 255 / 0.07);
   border-radius: 5px;
@@ -60,7 +63,7 @@ body {
 }
 .md pre {
   overflow-x: auto;
-  background: var(--color-ink-3);
+  background: var(--color-ink);
   border: 1px solid var(--color-line);
   border-radius: 10px;
   padding: 12px 14px;
@@ -86,7 +89,7 @@ body {
 }
 
 ::selection {
-  background: rgb(2 151 222 / 0.35);
+  background: rgb(122 167 224 / 0.35);
 }
 * {
   scrollbar-width: thin;
@@ -101,8 +104,8 @@ button {
   cursor: default;
 }
 .md {
-  font-size: 14.5px;
-  line-height: 1.7;
+  font-size: 15px;
+  line-height: 1.75;
   color: var(--color-fg);
 }
 .md h1 {

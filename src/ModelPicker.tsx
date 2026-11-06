@@ -7,7 +7,7 @@ import type { ModelInfo } from "./lib";
 function scoreTone(score: number | null) {
   if (score === null) return "text-fg-3 bg-white/[0.04]";
   if (score >= 65) return "text-ok bg-ok/10";
-  if (score >= 55) return "text-[#e9c46a] bg-[#e9c46a]/10";
+  if (score >= 55) return "text-[#d9b26a] bg-[#d9b26a]/10";
   return "text-fg-2 bg-white/[0.06]";
 }
 
@@ -74,7 +74,7 @@ export function ModelPicker({ value, models, onChange }: { value: string; models
         <Chevron className="h-3.5 w-3.5 shrink-0 opacity-60" />
       </button>
       {open && (
-        <div className="absolute bottom-full left-0 z-20 mb-2 w-[400px] overflow-hidden rounded-xl border border-white/10 bg-[#0b1820] shadow-2xl shadow-black/60">
+        <div className="absolute bottom-full left-0 z-20 mb-2 w-[400px] overflow-hidden rounded-xl border border-white/10 bg-ink-4 shadow-2xl shadow-black/60">
           <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
             <Search className="h-4 w-4 text-fg-3" />
             <input
