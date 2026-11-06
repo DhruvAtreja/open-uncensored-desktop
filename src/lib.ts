@@ -41,6 +41,13 @@ export interface Conversation {
   updated: number;
 }
 
+export interface UpdateState {
+  status: "idle" | "checking" | "downloading" | "ready" | "error";
+  version?: string; // the new version
+  current?: string; // this app's version
+  message?: string;
+}
+
 declare global {
   interface Window {
     ou: {
@@ -58,6 +65,10 @@ declare global {
       startAgent(opts: { runId: string; threadId?: string; prompt: string; cwd: string; model: string }): Promise<{ ok?: boolean; error?: string }>;
       stopAgent(runId: string): Promise<boolean>;
       onAgentEvent(fn: (p: { runId: string; event: Record<string, unknown> }) => void): () => void;
+      getUpdate(): Promise<UpdateState>;
+      checkForUpdate(): Promise<void>;
+      installUpdate(): Promise<boolean>;
+      onUpdate(fn: (s: UpdateState) => void): () => void;
     };
   }
 }

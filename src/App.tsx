@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronRight, File, Folder, Gear, Pencil, Plus, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
-import { type AgentItem, balance, type Conversation, fetchModels, md, type ModelInfo, pollPurchase, startPurchase, suggestTitle, uid } from "./lib";
+import { type AgentItem, type UpdateState, balance, type Conversation, fetchModels, md, type ModelInfo, pollPurchase, startPurchase, suggestTitle, uid } from "./lib";
 import logo from "./logo.svg";
 import { ModelPicker } from "./ModelPicker";
 
@@ -25,6 +25,11 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [credit, setCredit] = useState<number | null>(null);
   const [settings, setSettings] = useState(false);
+  const [appUpdate, setAppUpdate] = useState<UpdateState>({ status: "idle" });
+  useEffect(() => {
+    window.ou.getUpdate().then(setAppUpdate);
+    return window.ou.onUpdate(setAppUpdate);
+  }, []);
   const [sidebar, setSidebar] = useState(() => localStorage.getItem("ou.sidebar") !== "closed");
   const [width, setWidth] = useState(() => Number(localStorage.getItem("ou.sidebarWidth")) || 260);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -191,6 +196,16 @@ export default function App() {
             </div>
           ))}
         </nav>
+        {appUpdate.status === "ready" && (
+          <button
+            onClick={() => window.ou.installUpdate()}
+            title={`Version ${appUpdate.version} is ready`}
+            className="mx-3 -mb-1 mt-3 flex items-center gap-2 rounded-xl bg-white/[0.07] px-3 py-2.5 text-left text-[13px] font-medium text-fg transition-colors hover:bg-white/[0.11]"
+          >
+            <span className="flex-1">Relaunch to update</span>
+            <ArrowUp className="h-3.5 w-3.5 rotate-90 text-fg-2" />
+          </button>
+        )}
         <button
           onClick={() => setSettings(true)}
           className="m-3 flex items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 py-2.5 text-left transition-colors hover:bg-white/[0.05]"
@@ -235,11 +250,26 @@ export default function App() {
 
 // Shown in the top bar when the sidebar is hidden: room for the window buttons, then a toggle.
 function SidebarToggle({ open, onOpen }: { open: boolean; onOpen: () => void }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    window.ou.getUpdate().then((u) => setReady(u.status === "ready"));
+    return window.ou.onUpdate((u) => setReady(u.status === "ready"));
+  }, []);
   if (open) return null;
   return (
-    <button onClick={onOpen} title="Show sidebar (⌘\)" className="no-drag ml-[72px] rounded-md p-1.5 text-fg-3 hover:bg-white/[0.07] hover:text-fg">
-      <Sidebar className="h-4 w-4" />
-    </button>
+    <>
+      <button onClick={onOpen} title="Show sidebar (⌘\)" className="no-drag ml-[72px] rounded-md p-1.5 text-fg-3 hover:bg-white/[0.07] hover:text-fg">
+        <Sidebar className="h-4 w-4" />
+      </button>
+      {ready && (
+        <button
+          onClick={() => window.ou.installUpdate()}
+          className="no-drag ml-1 shrink-0 rounded-full bg-white/[0.08] px-2.5 py-1 text-[11.5px] font-medium text-fg hover:bg-white/[0.13]"
+        >
+          Relaunch to update
+        </button>
+      )}
+    </>
   );
 }
 
@@ -757,12 +787,56 @@ function Settings({
         </div>
         <p className="mb-2.5 mt-5 text-[13px] font-medium">Add credit</p>
         <Purchase topUpKey={apiKey} onDone={onRefresh} />
-        <div className="mt-6 border-t border-white/[0.06] pt-4">
+        <div className="mt-6 flex items-center justify-between border-t border-white/[0.06] pt-4">
           <button onClick={onSignOut} className="text-[12px] text-fg-3 transition-colors hover:text-bad">
             Remove key from this Mac
           </button>
+          <UpdateLine />
         </div>
       </div>
     </div>
+  );
+}
+
+// Settings footer: this version, and a manual check (the app also checks every 4 hours).
+function UpdateLine() {
+  const [u, setU] = useState<UpdateState>({ status: "idle" });
+  const [asked, setAsked] = useState(false);
+  useEffect(() => {
+    window.ou.getUpdate().then(setU);
+    return window.ou.onUpdate(setU);
+  }, []);
+  const label =
+    u.status === "ready"
+      ? null
+      : u.status === "downloading"
+        ? `Downloading ${u.version}…`
+        : u.status === "checking"
+          ? "Checking…"
+          : u.status === "error" && asked
+            ? "Update failed, try later"
+            : asked
+              ? "Up to date"
+              : "Check for updates";
+  return (
+    <span className="flex items-center gap-2 text-[12px] text-fg-3">
+      <span>v{u.current}</span>
+      {u.status === "ready" ? (
+        <button onClick={() => window.ou.installUpdate()} className="font-medium text-fg hover:underline">
+          Relaunch to update to {u.version}
+        </button>
+      ) : (
+        <button
+          disabled={u.status === "checking" || u.status === "downloading"}
+          onClick={() => {
+            setAsked(true);
+            window.ou.checkForUpdate();
+          }}
+          className="hover:text-fg disabled:hover:text-fg-3"
+        >
+          {label}
+        </button>
+      )}
+    </span>
   );
 }

@@ -17,6 +17,14 @@ contextBridge.exposeInMainWorld("ou", {
     ipcRenderer.on("chat:event", listener);
     return () => ipcRenderer.removeListener("chat:event", listener);
   },
+  getUpdate: () => ipcRenderer.invoke("update:get"),
+  checkForUpdate: () => ipcRenderer.invoke("update:check"),
+  installUpdate: () => ipcRenderer.invoke("update:install"),
+  onUpdate: (fn) => {
+    const listener = (_e, state) => fn(state);
+    ipcRenderer.on("update:state", listener);
+    return () => ipcRenderer.removeListener("update:state", listener);
+  },
   startAgent: (opts) => ipcRenderer.invoke("agent:start", opts),
   stopAgent: (runId) => ipcRenderer.invoke("agent:stop", runId),
   onAgentEvent: (fn) => {

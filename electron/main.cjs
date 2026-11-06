@@ -6,6 +6,7 @@ const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
+const updater = require("./updater.cjs");
 
 const API = "https://openuncensored.com/api/v1";
 const data = (...p) => path.join(app.getPath("userData"), ...p);
@@ -303,6 +304,13 @@ function createWindow() {
     streams.get(streamId)?.abort();
     return true;
   });
+  ipcMain.handle("update:get", () => ({ ...updater.getState(), current: app.getVersion() }));
+  ipcMain.handle("update:check", () => updater.checkNow());
+  ipcMain.handle("update:install", () => {
+    for (const child of runs.values()) child.kill("SIGINT"); // agent tasks stop; they resume from the conversation
+    return updater.install();
+  });
+  updater.onChange((s) => !win.isDestroyed() && win.webContents.send("update:state", { ...s, current: app.getVersion() }));
   ipcMain.handle("agent:start", (_e, opts) => startAgent(win, opts));
   ipcMain.handle("agent:stop", (_e, runId) => {
     runs.get(runId)?.kill("SIGINT");
@@ -315,6 +323,7 @@ app.whenReady().then(() => {
   installId();
   if (freshInstall) appEvent("app_install");
   appEvent("app_launch");
+  updater.start();
 });
 app.on("window-all-closed", () => {
   for (const child of runs.values()) child.kill("SIGINT");
