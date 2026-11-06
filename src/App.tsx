@@ -354,13 +354,13 @@ function Composer({
   return (
     <div className="px-6 pb-4 pt-2">
       <div className="mx-auto max-w-[760px]">
-        <div className="flex items-end gap-1 rounded-[18px] border border-[#404040] bg-[#303030] py-1.5 pl-2 pr-2 transition-colors focus-within:border-[#4a4a4a]">
+        <div className="flex items-end gap-1 rounded-[16px] border border-[#404040] bg-[#303030] py-[3px] pl-1.5 pr-1.5 transition-colors focus-within:border-[#4a4a4a]">
           <button
             onClick={attach}
             title="Add files (their paths go in the message for the agent to read)"
-            className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-fg transition-colors hover:bg-white/[0.08]"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-fg transition-colors hover:bg-white/[0.08]"
           >
-            <Plus className="h-[18px] w-[18px]" />
+            <Plus className="h-4 w-4" />
           </button>
           <textarea
             ref={box}
@@ -374,10 +374,10 @@ function Composer({
             }}
             rows={1}
             placeholder="Ask anything, or describe a task"
-            className="block max-h-[220px] min-h-[38px] flex-1 resize-none bg-transparent py-[9px] text-[15px] leading-[20px] text-fg outline-none placeholder:text-[#878787]"
+            className="block max-h-[220px] min-h-[32px] flex-1 resize-none bg-transparent py-[6px] text-[14.5px] leading-[20px] text-fg outline-none placeholder:text-[#878787]"
           />
           {busy ? (
-            <button onClick={onStop} title="Stop" className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-fg transition-colors hover:bg-white/20">
+            <button onClick={onStop} title="Stop" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-fg transition-colors hover:bg-white/20">
               <Square className="h-3.5 w-3.5" />
             </button>
           ) : (
@@ -385,9 +385,9 @@ function Composer({
               onClick={send}
               disabled={!draft.trim()}
               title="Send (↵)"
-              className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-fg text-ink transition-opacity hover:bg-white disabled:bg-transparent disabled:text-fg-3"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fg text-ink transition-opacity hover:bg-white disabled:bg-transparent disabled:text-fg-3"
             >
-              <ArrowUp className="h-[18px] w-[18px]" />
+              <ArrowUp className="h-4 w-4" />
             </button>
           )}
         </div>
