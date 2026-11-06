@@ -1,0 +1,82 @@
+{
+  "name": "open-uncensored-desktop",
+  "productName": "Open Uncensored",
+  "version": "0.1.0",
+  "description": "Chat and a coding agent on uncensored models, from Open Uncensored.",
+  "license": "MIT",
+  "private": true,
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "vite build && electron .",
+    "dist": "vite build && electron-builder --mac --arm64"
+  },
+  "dependencies": {
+    "@openai/codex": "0.163.0",
+    "marked": "18.1.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "^5",
+    "vite": "8.3.5"
+  },
+  "build": {
+    "appId": "com.openuncensored.desktop",
+    "productName": "Open Uncensored",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "!electron/devdrive.cjs",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/@openai/codex-darwin-*/**"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": false
+    },
+    "dmg": {
+      "title": "Open Uncensored"
+    },
+    "extraResources": [
+      {
+        "from": "LICENSE",
+        "to": "LICENSE"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      }
+    ],
+    "artifactName": "Open-Uncensored-${version}-mac-${arch}.${ext}"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DhruvAtreja/open-uncensored-desktop"
+  },
+  "homepage": "https://openuncensored.com",
+  "author": "Dhruv Atreja"
+}
