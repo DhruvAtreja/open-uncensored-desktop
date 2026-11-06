@@ -14,12 +14,21 @@ run code for you, on any of the uncensored and abliterated models served by
 
 ## Install
 
-Download the latest DMG from [Releases](https://github.com/DhruvAtreja/open-uncensored-desktop/releases/latest)
-(Apple Silicon Macs), open it and drag **Open Uncensored** to Applications.
+Paste this into Terminal (Apple Silicon Macs):
 
-The app is not yet notarized by Apple, so the first launch needs one extra step: open it once, then go to
-**System Settings → Privacy & Security** and click **Open Anyway** next to "Open Uncensored". After that it
-opens normally.
+```bash
+curl -fsSL https://openuncensored.com/install.sh | sh
+```
+
+It downloads the latest release from this repo, checks it against the published SHA-256, puts
+**Open Uncensored** in Applications and opens it. After that the app updates itself: new versions
+download in the background and the sidebar shows **Relaunch to update**.
+
+Or download the DMG from [Releases](https://github.com/DhruvAtreja/open-uncensored-desktop/releases/latest)
+and drag the app to Applications. The app is not notarized by Apple yet, so a browser download is
+blocked on first launch ("Apple could not verify..."): click **Done**, open **System Settings →
+Privacy & Security**, and click **Open Anyway** next to Open Uncensored. The Terminal install does not
+need this step.
 
 ## How it works
 
