@@ -31,6 +31,39 @@ function writeKey(key) {
   fs.writeFileSync(data("key.bin"), raw, { mode: 0o600 });
 }
 
+// ---------------------------------------------------------------------------- usage events
+// A random install id (no name, email, key or prompts) and a handful of events: installed, opened,
+// a key added, an agent task started. They show how many downloads become users; the website's
+// privacy page lists them. Development builds send nothing.
+
+let installIdCache = null;
+let freshInstall = false;
+
+function installId() {
+  if (installIdCache) return installIdCache;
+  try {
+    installIdCache = fs.readFileSync(data("install-id"), "utf8").trim();
+  } catch {}
+  if (!installIdCache) {
+    installIdCache = require("node:crypto").randomUUID();
+    freshInstall = true;
+    try {
+      fs.writeFileSync(data("install-id"), installIdCache);
+    } catch {}
+  }
+  return installIdCache;
+}
+
+function appEvent(event, props = {}) {
+  if (!app.isPackaged) return;
+  fetch("https://openuncensored.com/api/e", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Title": "Open Uncensored Desktop" },
+    body: JSON.stringify({ event, vid: installId(), ref: "desktop-app", props: { version: app.getVersion(), ...props } }),
+    signal: AbortSignal.timeout(5000),
+  }).catch(() => {});
+}
+
 // ---------------------------------------------------------------------------- conversations
 
 function readConversations() {
@@ -95,6 +128,8 @@ function codexHome() {
       `base_url = "${API}"`,
       'env_key = "OU_API_KEY"',
       'wire_api = "responses"',
+      // Names the app in the request log, so agent traffic from here is told apart from other Codex users.
+      'http_headers = { "X-Title" = "Open Uncensored Desktop" }',
       "",
     ].join("\n"),
   );
@@ -116,6 +151,7 @@ function startAgent(win, { runId, threadId, prompt, cwd, model }) {
     stdio: ["ignore", "pipe", "pipe"],
   });
   runs.set(runId, child);
+  if (!threadId) appEvent("app_agent_run", { model });
   const send = (event) => !win.isDestroyed() && win.webContents.send("agent:event", { runId, event });
   readline.createInterface({ input: child.stdout }).on("line", (line) => {
     try {
@@ -139,7 +175,7 @@ function startAgent(win, { runId, threadId, prompt, cwd, model }) {
 async function request({ url, method = "GET", body, auth = true, claim }) {
   if (!url.startsWith("https://openuncensored.com/")) return { status: 0, json: { error: "blocked" } };
   const key = readKey();
-  const headers = { "Content-Type": "application/json", "X-Title": "Open Uncensored Desktop" };
+  const headers = { "Content-Type": "application/json", "X-Title": "Open Uncensored Desktop", "X-OU-Install": installId() };
   if (auth && key) headers.Authorization = `Bearer ${key}`;
   if (claim) headers.Authorization = `Bearer ${claim}`; // agent checkout polling
   try {
@@ -240,7 +276,10 @@ function createWindow() {
   else win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
 
   ipcMain.handle("key:get", () => readKey());
-  ipcMain.handle("key:set", (_e, key) => writeKey(key));
+  ipcMain.handle("key:set", (_e, key) => {
+    writeKey(key);
+    if (key) appEvent("app_key");
+  });
   ipcMain.handle("conversations:get", () => readConversations());
   ipcMain.handle("conversations:set", (_e, list) => writeConversations(list));
   ipcMain.handle("folder:pick", async () => {
@@ -271,7 +310,12 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  installId();
+  if (freshInstall) appEvent("app_install");
+  appEvent("app_launch");
+});
 app.on("window-all-closed", () => {
   for (const child of runs.values()) child.kill("SIGINT");
   app.quit();
