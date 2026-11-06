@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Chevron, Search } from "./icons";
+import { Check, Search } from "./icons";
 import type { ModelInfo } from "./lib";
 
 // A searchable popover: ranked models first with their OpenUncensored Score, then everything else.
@@ -67,14 +67,14 @@ export function ModelPicker({ value, models, onChange }: { value: string; models
     <div ref={root} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex max-w-[320px] items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-fg-2 transition-colors hover:bg-white/[0.06] hover:text-fg"
+        title="Change model"
+        className="flex max-w-[360px] items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[13px] text-fg transition-colors hover:bg-white/[0.06]"
       >
-        {current?.rank && <span className="font-mono text-[11px] text-fg-3">#{current.rank}</span>}
         <span className="truncate">{current?.name ?? value}</span>
-        <Chevron className="h-3.5 w-3.5 shrink-0 opacity-60" />
+        {current?.rank && <span className="shrink-0 text-fg-3">#{current.rank}</span>}
       </button>
       {open && (
-        <div className="absolute bottom-full left-0 z-20 mb-2 w-[400px] overflow-hidden rounded-xl border border-white/10 bg-ink-4 shadow-2xl shadow-black/60">
+        <div className="absolute bottom-full right-0 z-20 mb-2 w-[400px] overflow-hidden rounded-xl border border-white/10 bg-ink-4 shadow-2xl shadow-black/60">
           <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
             <Search className="h-4 w-4 text-fg-3" />
             <input

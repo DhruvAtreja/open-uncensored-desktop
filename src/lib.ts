@@ -56,6 +56,7 @@ declare global {
       getConversations(): Promise<Conversation[]>;
       setConversations(list: Conversation[]): Promise<void>;
       pickFolder(): Promise<string | null>;
+      pickFiles(): Promise<string[]>;
       defaultFolder(): Promise<string>;
       openUrl(url: string): Promise<void>;
       request(opts: { url: string; method?: string; body?: unknown; auth?: boolean; claim?: string }): Promise<{ status: number; json: unknown }>;

@@ -344,42 +344,59 @@ function Composer({
     setDraft("");
     onSend(t);
   };
+  const attach = async () => {
+    const paths = await window.ou.pickFiles();
+    if (!paths.length) return;
+    const refs = paths.map((p) => (/\s/.test(p) ? `"${p}"` : p)).join(" ");
+    setDraft(draft.trim() ? `${draft.trimEnd()} ${refs} ` : `${refs} `);
+    box.current?.focus();
+  };
   return (
-    <div className="px-6 pb-5 pt-2">
-      <div className="mx-auto max-w-[760px] rounded-2xl border border-white/10 bg-ink-3 shadow-lg shadow-black/30 transition-colors focus-within:border-white/20">
-        <textarea
-          ref={box}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              send();
-            }
-          }}
-          rows={1}
-          placeholder="Ask anything, or describe a task"
-          className="block max-h-[220px] w-full resize-none bg-transparent px-4 pt-3.5 text-[14.5px] leading-relaxed text-fg outline-none placeholder:text-fg-3"
-        />
-        <div className="flex items-center justify-between gap-3 px-2 pb-2 pt-1">
+    <div className="px-6 pb-4 pt-2">
+      <div className="mx-auto max-w-[760px]">
+        <div className="flex items-end gap-1 rounded-[18px] border border-[#404040] bg-[#303030] py-1.5 pl-2 pr-2 transition-colors focus-within:border-[#4a4a4a]">
+          <button
+            onClick={attach}
+            title="Add files (their paths go in the message for the agent to read)"
+            className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-fg transition-colors hover:bg-white/[0.08]"
+          >
+            <Plus className="h-[18px] w-[18px]" />
+          </button>
+          <textarea
+            ref={box}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                send();
+              }
+            }}
+            rows={1}
+            placeholder="Ask anything, or describe a task"
+            className="block max-h-[220px] min-h-[38px] flex-1 resize-none bg-transparent py-[9px] text-[15px] leading-[20px] text-fg outline-none placeholder:text-[#878787]"
+          />
+          {busy ? (
+            <button onClick={onStop} title="Stop" className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-fg transition-colors hover:bg-white/20">
+              <Square className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <button
+              onClick={send}
+              disabled={!draft.trim()}
+              title="Send (↵)"
+              className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-fg text-ink transition-opacity hover:bg-white disabled:bg-transparent disabled:text-fg-3"
+            >
+              <ArrowUp className="h-[18px] w-[18px]" />
+            </button>
+          )}
+        </div>
+        <div className="mt-2 flex items-center justify-end gap-4 pr-1 text-[13px]">
           {picker}
-          <div className="flex items-center gap-3">
-            <span className="hidden text-[11px] text-fg-3 sm:block">{busy ? "Working" : "↵ send · ⇧↵ new line"}</span>
-            {busy ? (
-              <button onClick={onStop} title="Stop" className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-fg transition-colors hover:bg-white/20">
-                <Square className="h-3.5 w-3.5" />
-              </button>
-            ) : (
-              <button
-                onClick={send}
-                disabled={!draft.trim()}
-                title="Send"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-fg text-ink transition-opacity hover:bg-white disabled:opacity-30"
-              >
-                <ArrowUp className="h-4 w-4" />
-              </button>
-            )}
-          </div>
+          <span className="text-fg" title="The agent can read, edit and run anything your account can">
+            Full access
+          </span>
+          {busy && <Spinner className="h-3.5 w-3.5 text-fg-3" />}
         </div>
       </div>
     </div>
@@ -540,9 +557,6 @@ function AgentView({
         <span title={convo.folder} className="no-drag flex max-w-[260px] items-center gap-1.5 rounded-md bg-white/[0.05] px-2 py-1 text-[11.5px] text-fg-2">
           <Folder className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate">{folderName(convo.folder)}</span>
-        </span>
-        <span className="no-drag rounded-md bg-orange/10 px-2 py-1 text-[11px] text-orange" title="The agent can read, edit and run anything your account can">
-          Full access
         </span>
       </header>
 

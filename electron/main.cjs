@@ -288,6 +288,10 @@ function createWindow() {
     const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });
     return r.canceled ? null : r.filePaths[0];
   });
+  ipcMain.handle("files:pick", async () => {
+    const r = await dialog.showOpenDialog(win, { properties: ["openFile", "multiSelections"] });
+    return r.canceled ? [] : r.filePaths;
+  });
   // Conversations without a project work in ~/Open Uncensored.
   ipcMain.handle("folder:default", () => {
     const dir = path.join(app.getPath("home"), "Open Uncensored");

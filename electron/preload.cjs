@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("ou", {
   getConversations: () => ipcRenderer.invoke("conversations:get"),
   setConversations: (list) => ipcRenderer.invoke("conversations:set", list),
   pickFolder: () => ipcRenderer.invoke("folder:pick"),
+  pickFiles: () => ipcRenderer.invoke("files:pick"),
   defaultFolder: () => ipcRenderer.invoke("folder:default"),
   openUrl: (url) => ipcRenderer.invoke("open:url", url),
   request: (opts) => ipcRenderer.invoke("net:request", opts),
