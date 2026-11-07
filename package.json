@@ -1,7 +1,7 @@
 {
   "name": "open-uncensored-desktop",
   "productName": "Open Uncensored",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Chat and a coding agent on uncensored models, from Open Uncensored.",
   "license": "MIT",
   "private": true,

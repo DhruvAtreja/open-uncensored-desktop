@@ -124,6 +124,8 @@ function codexHome() {
       "memories = false",
       "multi_agent = false",
       "image_generation = false",
+      // Our models read text only: an image the agent opens would reach them as base64 text.
+      "view_image = false",
       "standalone_web_search = false",
       "request_permissions_tool = false",
       "",
@@ -155,11 +157,33 @@ function codexHome() {
 
 const runs = new Map(); // runId -> child process
 
-function startAgent(win, { runId, threadId, prompt, cwd, model }) {
+// Each model's context window, from the public model list. Codex has no metadata for our models,
+// so without this it guesses a window and compacts the conversation too late (or never).
+let contextWindows = null;
+async function contextWindow(model) {
+  if (!contextWindows) {
+    try {
+      const res = await fetch(`${API}/models`, { headers: { "X-Title": "Open Uncensored Desktop" }, signal: AbortSignal.timeout(5000) });
+      const body = await res.json();
+      contextWindows = Object.fromEntries((body.data || []).map((m) => [m.id, m.context_length]));
+    } catch {
+      return null; // try again next run
+    }
+  }
+  return contextWindows[model] || null;
+}
+
+async function startAgent(win, { runId, threadId, prompt, cwd, model }) {
   const key = readKey();
   if (!key) return { error: "Add an API key first." };
   const { bin, toolsDir } = codexBinary();
   const args = ["exec", "--json", "--skip-git-repo-check", "-m", model, "-C", cwd];
+  const window = await contextWindow(model);
+  if (window) {
+    // Compact at 80% of the window, and by 250K tokens at most so long sessions stay cheap.
+    const compactAt = Math.min(Math.floor(window * 0.8), 250000);
+    args.push("-c", `model_context_window=${window}`, "-c", `model_auto_compact_token_limit=${compactAt}`);
+  }
   if (threadId) args.push("resume", threadId, prompt);
   else args.push(prompt);
   const child = spawn(bin, args, {
