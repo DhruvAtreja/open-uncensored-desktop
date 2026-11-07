@@ -90,6 +90,12 @@ function codexBinary() {
   return { bin: path.join(base, "bin", "codex"), toolsDir: path.join(base, "codex-path") };
 }
 
+// The image generation tool (image-tool.cjs), an MCP server the agent can call. It runs on the app's
+// own Electron binary in Node mode; packaged, it sits unpacked next to app.asar (see asarUnpack).
+function imageToolPath() {
+  return path.join(__dirname, "image-tool.cjs").replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+}
+
 // A private Codex home, so the app never touches the user's own ~/.codex setup. Our own system
 // prompt (agent-prompt.md) replaces Codex's, and Codex's extras (skills, including the user's
 // personal ones, memories, goals, sub-agents, apps, OpenAI-hosted tools) are switched off.
@@ -132,6 +138,16 @@ function codexHome() {
       // Names the app in the request log, so agent traffic from here is told apart from other Codex users.
       'http_headers = { "X-Title" = "Open Uncensored Desktop" }',
       "",
+      // generate_image / list_image_models: pictures from the uncensored image models, saved into
+      // the conversation's folder (OU_IMAGE_DIR) and billed to the same key.
+      "[mcp_servers.images]",
+      `command = ${JSON.stringify(process.execPath)}`,
+      `args = [${JSON.stringify(imageToolPath())}]`,
+      'env = { ELECTRON_RUN_AS_NODE = "1" }',
+      'env_vars = ["OU_API_KEY", "OU_IMAGE_DIR"]',
+      "startup_timeout_sec = 20",
+      "tool_timeout_sec = 300",
+      "",
     ].join("\n"),
   );
   return home;
@@ -148,7 +164,7 @@ function startAgent(win, { runId, threadId, prompt, cwd, model }) {
   else args.push(prompt);
   const child = spawn(bin, args, {
     cwd,
-    env: { ...process.env, OU_API_KEY: key, CODEX_HOME: codexHome(), PATH: `${toolsDir}:${process.env.PATH}` },
+    env: { ...process.env, OU_API_KEY: key, OU_IMAGE_DIR: cwd, CODEX_HOME: codexHome(), PATH: `${toolsDir}:${process.env.PATH}` },
     stdio: ["ignore", "pipe", "pipe"],
   });
   runs.set(runId, child);
@@ -299,6 +315,20 @@ function createWindow() {
     return dir;
   });
   ipcMain.handle("open:url", (_e, url) => /^https:\/\//.test(url) && shell.openExternal(url));
+  // Pictures the image tool saved, shown inline in the chat and opened in Preview on click.
+  // Only image files, so the page cannot read or open anything else through these.
+  const isImage = (p) => typeof p === "string" && path.isAbsolute(p) && /\.(png|jpe?g|webp)$/i.test(p);
+  ipcMain.handle("image:read", (_e, file) => {
+    if (!isImage(file)) return null;
+    try {
+      if (fs.statSync(file).size > 25 * 1024 * 1024) return null;
+      const ext = path.extname(file).slice(1).toLowerCase().replace("jpg", "jpeg");
+      return `data:image/${ext};base64,${fs.readFileSync(file).toString("base64")}`;
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.handle("image:open", (_e, file) => isImage(file) && fs.existsSync(file) && shell.openPath(file));
   ipcMain.handle("net:request", (_e, opts) => request(opts));
   ipcMain.handle("chat:start", (_e, opts) => {
     chatStream(win, opts);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronRight, File, Folder, Gear, Pencil, Plus, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
+import { ArrowUp, Check, ChevronRight, File, Folder, Gear, ImageIcon, Pencil, Plus, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
 import { type AgentItem, type UpdateState, balance, type Conversation, fetchModels, md, type ModelInfo, pollPurchase, startPurchase, suggestTitle, uid } from "./lib";
 import logo from "./logo.svg";
 import { ModelPicker } from "./ModelPicker";
@@ -484,6 +484,17 @@ function AgentView({
               upsert({ kind: "file", id, summary: changes.map((c) => `${c.kind}\t${c.path}`).join("\n") });
               break;
             }
+            case "mcp_tool_call": {
+              // The image tool (electron/image-tool.cjs); other MCP tools are not configured.
+              if (item.tool !== "generate_image") break;
+              const args = (item.arguments ?? {}) as { prompt?: string; model?: string };
+              const result = (item.result ?? {}) as { content?: { type: string; text?: string }[]; structured_content?: { files?: string[] } };
+              const files = result.structured_content?.files ?? [];
+              const text = (result.content ?? []).map((c) => c.text ?? "").join("\n");
+              const error = (item.error as { message?: string } | null)?.message ?? (item.status === "failed" || (!files.length && type === "item.completed") ? text || "Image generation failed." : "");
+              upsert({ kind: "image", id, prompt: String(args.prompt ?? ""), model: String(args.model ?? "z-image-turbo"), files, error, running: type !== "item.completed" });
+              break;
+            }
             case "error":
               if (!String(item.message).startsWith("Model metadata")) upsert({ kind: "error", id, text: String(item.message ?? "") });
               break;
@@ -527,6 +538,7 @@ function AgentView({
   const modelName = (id?: string) => models.find((m) => m.id === id)?.name ?? id ?? "";
   const lastItems = convo.turns[convo.turns.length - 1]?.items ?? [];
   const running = lastItems.findLast((i) => i.kind === "command" && i.running) as Extract<AgentItem, { kind: "command" }> | undefined;
+  const drawing = lastItems.some((i) => i.kind === "image" && i.running);
 
   return (
     <>
@@ -585,7 +597,7 @@ function AgentView({
                 {busy && i === convo.turns.length - 1 && (
                   <div className="flex items-center gap-2 py-1 text-[12.5px] text-fg-3">
                     <Spinner />
-                    <span className="truncate">{running ? `Running ${cleanCommand(running.command).slice(0, 60)}` : "Thinking"}</span>
+                    <span className="truncate">{drawing ? "Generating image" : running ? `Running ${cleanCommand(running.command).slice(0, 60)}` : "Thinking"}</span>
                   </div>
                 )}
               </div>
@@ -653,9 +665,49 @@ function AgentItemView({ item }: { item: AgentItem }) {
           })}
         </div>
       );
+    case "image":
+      return (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-[12.5px] text-fg-3">
+            <span className={item.running ? "text-blue" : item.error ? "text-bad" : "text-ok"}>
+              {item.running ? <Spinner /> : item.error ? <X className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+            </span>
+            <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 truncate">
+              {item.running ? "Generating" : "Generated"} with {item.model}: <span className="text-fg-2">{item.prompt}</span>
+            </span>
+          </div>
+          {item.files.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {item.files.map((f) => (
+                <LocalImage key={f} file={f} />
+              ))}
+            </div>
+          )}
+          {item.error && <div className="whitespace-pre-wrap break-words rounded-lg border border-bad/30 bg-bad/[0.06] px-3 py-2 text-[12.5px] text-bad">{item.error}</div>}
+        </div>
+      );
     case "error":
       return <div className="whitespace-pre-wrap break-words rounded-lg border border-bad/30 bg-bad/[0.06] px-3 py-2 text-[12.5px] text-bad">{item.text}</div>;
   }
+}
+
+// A picture the image tool saved in the conversation's folder; opens in Preview on click.
+function LocalImage({ file }: { file: string }) {
+  const [src, setSrc] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    window.ou.readImage(file).then((s) => live && setSrc(s));
+    return () => {
+      live = false;
+    };
+  }, [file]);
+  if (src === null) return <span className="rounded-md bg-white/[0.04] px-2 py-1 font-mono text-[11.5px] text-fg-3">{file.split("/").pop()} (moved or deleted)</span>;
+  return (
+    <button onClick={() => window.ou.openImage(file)} title={file} className="overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] hover:border-white/20">
+      {src ? <img src={src} alt="" className="block max-h-[360px] max-w-[360px] object-contain" /> : <div className="grid h-[200px] w-[200px] place-items-center"><Spinner /></div>}
+    </button>
+  );
 }
 
 function Purchase({ topUpKey, onKey, onDone }: { topUpKey?: string; onKey?: (k: string) => void; onDone?: () => void }) {

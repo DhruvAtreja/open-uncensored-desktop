@@ -19,6 +19,7 @@ export const Search = (p: P) => base(<><circle cx="11" cy="11" r="6.5" /><path d
 export const Terminal = (p: P) => base(<><path d="M5 8l4 4-4 4M12 17h7" /></>, p);
 export const File = (p: P) => base(<><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></>, p);
 export const Spark = (p: P) => base(<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6" />, p);
+export const ImageIcon = (p: P) => base(<><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><circle cx="9" cy="10" r="1.6" /><path d="M20.5 15.5l-4.5-4.5-8.5 8.5" /></>, p);
 export const Pencil = (p: P) => base(<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16zM13.5 6.5l4 4" />, p);
 export const Sidebar = (p: P) => base(<><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M9.5 4.5v15" /></>, p);
 export const Spinner = ({ className = "h-3.5 w-3.5" }: P) => (

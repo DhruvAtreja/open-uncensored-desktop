@@ -19,6 +19,7 @@ export type AgentItem =
   | { kind: "reasoning"; id: string; text: string }
   | { kind: "command"; id: string; command: string; output: string; exitCode: number | null; running: boolean }
   | { kind: "file"; id: string; summary: string }
+  | { kind: "image"; id: string; prompt: string; model: string; files: string[]; error: string; running: boolean }
   | { kind: "error"; id: string; text: string };
 
 export interface Turn {
@@ -59,6 +60,8 @@ declare global {
       pickFiles(): Promise<string[]>;
       defaultFolder(): Promise<string>;
       openUrl(url: string): Promise<void>;
+      readImage(file: string): Promise<string | null>;
+      openImage(file: string): Promise<void>;
       request(opts: { url: string; method?: string; body?: unknown; auth?: boolean; claim?: string }): Promise<{ status: number; json: unknown }>;
       startChat(opts: { streamId: string; model: string; messages: { role: string; content: string }[] }): Promise<boolean>;
       stopChat(streamId: string): Promise<boolean>;
