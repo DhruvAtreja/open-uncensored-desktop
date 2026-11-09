@@ -1,6 +1,6 @@
 # Third party notices
 
-Open Uncensored Desktop is MIT licensed (see LICENSE). It includes or is derived from the following.
+OpenUncensored Desktop is MIT licensed (see LICENSE). It includes or is derived from the following.
 
 ## Codex CLI (Apache License 2.0)
 

@@ -1,6 +1,6 @@
 import { marked } from "marked";
 
-// Shared types, the Open Uncensored API calls and safe markdown.
+// Shared types, the OpenUncensored API calls and safe markdown.
 
 export const SITE = "https://openuncensored.com";
 export const API = `${SITE}/api/v1`;

@@ -45,7 +45,7 @@ function newer(a, b) {
   return false;
 }
 
-// /Applications/Open Uncensored.app, from .../Open Uncensored.app/Contents/MacOS/Open Uncensored
+// /Applications/OpenUncensored.app, from .../OpenUncensored.app/Contents/MacOS/OpenUncensored
 function currentBundle() {
   const exe = app.getPath("exe");
   const i = exe.indexOf(".app/Contents/MacOS/");
@@ -118,25 +118,29 @@ function install() {
   const bundle = currentBundle();
   const next = state.app;
   const backup = `${bundle}.old`;
+  // The update lands under its own bundle name (OpenUncensored.app since 0.1.8), so a copy installed
+  // as "Open Uncensored.app" is replaced by the renamed one rather than keeping the old file name.
+  const target = path.join(path.dirname(bundle), path.basename(next));
   const script = path.join(app.getPath("userData"), "update", "install.sh");
   // Paths go in as arguments, never into the script text.
   fs.writeFileSync(
     script,
     [
       "#!/bin/sh",
-      'pid="$1"; bundle="$2"; next="$3"; backup="$4"',
+      'pid="$1"; bundle="$2"; next="$3"; backup="$4"; target="$5"',
       'while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done',
       'rm -rf "$backup"',
       'mv "$bundle" "$backup" || exit 1',
-      'if /usr/bin/ditto "$next" "$bundle"; then rm -rf "$backup"; else rm -rf "$bundle"; mv "$backup" "$bundle"; fi',
-      '/usr/bin/xattr -dr com.apple.quarantine "$bundle" 2>/dev/null',
+      '[ "$target" = "$bundle" ] || rm -rf "$target"',
+      'if /usr/bin/ditto "$next" "$target"; then rm -rf "$backup"; else rm -rf "$target"; mv "$backup" "$bundle"; target="$bundle"; fi',
+      '/usr/bin/xattr -dr com.apple.quarantine "$target" 2>/dev/null',
       'rm -rf "$(dirname "$next")"',
-      '/usr/bin/open "$bundle"',
+      '/usr/bin/open "$target"',
       "",
     ].join("\n"),
     { mode: 0o755 },
   );
-  spawn("/bin/sh", [script, String(process.pid), bundle, next, backup], { detached: true, stdio: "ignore" }).unref();
+  spawn("/bin/sh", [script, String(process.pid), bundle, next, backup, target], { detached: true, stdio: "ignore" }).unref();
   app.quit();
   return true;
 }

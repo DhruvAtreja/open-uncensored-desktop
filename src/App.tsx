@@ -125,7 +125,7 @@ export default function App() {
       <aside style={{ width }} className="relative flex shrink-0 flex-col border-r border-white/[0.06] bg-ink-2">
         <div className="drag flex h-[52px] shrink-0 items-center pl-[84px] pr-2">
           <img src={logo} alt="" className="h-[18px] w-[18px] rounded-[5px]" />
-          <span className="ml-2 min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight">Open Uncensored</span>
+          <span className="ml-2 min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight">OpenUncensored</span>
           <button onClick={() => setSidebar(false)} title="Hide sidebar (⌘\)" className="no-drag rounded-md p-1.5 text-fg-3 hover:bg-white/[0.07] hover:text-fg">
             <Sidebar className="h-4 w-4" />
           </button>
@@ -770,7 +770,7 @@ function KeySetup({ onKey }: { onKey: (k: string) => void }) {
       <div className="flex flex-1 items-center justify-center px-6 pb-12">
         <div className="w-full max-w-[400px]">
           <img src={logo} alt="" className="h-11 w-11 rounded-xl" />
-          <h1 className="mt-5 text-[26px] font-semibold tracking-tight">Open Uncensored</h1>
+          <h1 className="mt-5 text-[26px] font-semibold tracking-tight">OpenUncensored</h1>
           <div className="mt-7 rounded-2xl border border-white/[0.08] bg-ink-3 p-5">
             <p className="text-[13.5px] font-medium">Get started with credits</p>
             <p className="mb-3.5 mt-1 text-[12.5px] text-fg-3">Pay by card in your browser. Your key arrives here automatically.</p>

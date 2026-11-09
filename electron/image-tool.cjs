@@ -1,6 +1,6 @@
 // Image generation tool for the agent: a minimal MCP server (stdio, newline-delimited JSON-RPC)
 // that the bundled Codex starts for every agent run (see codexHome() in main.cjs). It calls the
-// Open Uncensored images API with the user's key and saves the pictures into the conversation's
+// OpenUncensored images API with the user's key and saves the pictures into the conversation's
 // folder, returning their paths so the agent can use them and the app can show them.
 //
 // Run by the app's own Electron binary with ELECTRON_RUN_AS_NODE=1, so it needs no Node install.
@@ -21,7 +21,7 @@ const TOOLS = [
     name: "generate_image",
     description:
       "Generate images from a text prompt with an uncensored image model (adult content allowed; nothing involving minors or real people without consent). " +
-      "Saves the images as files in the working folder (or `directory`) and returns their paths. Each image is billed to the user's Open Uncensored credits, about $0.01 to $0.04. " +
+      "Saves the images as files in the working folder (or `directory`) and returns their paths. Each image is billed to the user's OpenUncensored credits, about $0.01 to $0.04. " +
       "Call list_image_models to see every model. Good picks: z-image-turbo (fast photoreal, default), lustify-v8 (explicit photo), " +
       "wai-illustrious (anime; start the prompt with 'masterpiece, best quality'), pony-diffusion-v6 (stylised; start with 'score_9, score_8_up, score_7_up'), chroma (strong prompt following).",
     inputSchema: {
@@ -73,7 +73,7 @@ async function api(pathname, init = {}) {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      "X-Title": "Open Uncensored Desktop",
+      "X-Title": "OpenUncensored Desktop",
       ...(key ? { Authorization: `Bearer ${key}` } : {}),
       ...(init.headers || {}),
     },
@@ -85,7 +85,7 @@ async function api(pathname, init = {}) {
 }
 
 async function generateImage(args) {
-  if (!process.env.OU_API_KEY) return text("No Open Uncensored API key is set in the app.", { isError: true });
+  if (!process.env.OU_API_KEY) return text("No OpenUncensored API key is set in the app.", { isError: true });
   const prompt = String(args.prompt || "").trim();
   if (!prompt) return text("prompt is required.", { isError: true });
   const model = String(args.model || DEFAULT_MODEL);

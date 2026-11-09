@@ -1,12 +1,20 @@
 // Electron main process: the window, the API key (encrypted with the OS keychain), saved
 // conversations, and the coding agent, which is the open source Codex CLI pointed at the
-// Open Uncensored API (it speaks the Responses API, which the router serves at /v1/responses).
-const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require("electron");
+// OpenUncensored API (it speaks the Responses API, which the router serves at /v1/responses).
+const { app, BrowserWindow, Menu, dialog, ipcMain, safeStorage, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
 const updater = require("./updater.cjs");
+
+// The app was called "Open Uncensored" until 0.1.8. Electron names the data folder and the
+// Keychain entry that encrypts the saved key ("<name> Safe Storage") after app.name, so it
+// keeps the old name internally: renaming it would lose every user's key and conversations.
+// Everything the user sees says OpenUncensored (bundle name, menus, About panel, window).
+const DISPLAY_NAME = "OpenUncensored";
+app.setName("Open Uncensored");
+app.setAboutPanelOptions({ applicationName: DISPLAY_NAME });
 
 const API = "https://openuncensored.com/api/v1";
 const data = (...p) => path.join(app.getPath("userData"), ...p);
@@ -59,7 +67,7 @@ function appEvent(event, props = {}) {
   if (!app.isPackaged) return;
   fetch("https://openuncensored.com/api/e", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Title": "Open Uncensored Desktop" },
+    headers: { "Content-Type": "application/json", "X-Title": "OpenUncensored Desktop" },
     body: JSON.stringify({ event, vid: installId(), ref: "desktop-app", props: { version: app.getVersion(), ...props } }),
     signal: AbortSignal.timeout(5000),
   }).catch(() => {});
@@ -133,12 +141,12 @@ function codexHome() {
       "enabled = false",
       "",
       "[model_providers.openuncensored]",
-      'name = "Open Uncensored"',
+      'name = "OpenUncensored"',
       `base_url = "${API}"`,
       'env_key = "OU_API_KEY"',
       'wire_api = "responses"',
       // Names the app in the request log, so agent traffic from here is told apart from other Codex users.
-      'http_headers = { "X-Title" = "Open Uncensored Desktop" }',
+      'http_headers = { "X-Title" = "OpenUncensored Desktop" }',
       "",
       // generate_image / list_image_models: pictures from the uncensored image models, saved into
       // the conversation's folder (OU_IMAGE_DIR) and billed to the same key.
@@ -163,7 +171,7 @@ let contextWindows = null;
 async function contextWindow(model) {
   if (!contextWindows) {
     try {
-      const res = await fetch(`${API}/models`, { headers: { "X-Title": "Open Uncensored Desktop" }, signal: AbortSignal.timeout(5000) });
+      const res = await fetch(`${API}/models`, { headers: { "X-Title": "OpenUncensored Desktop" }, signal: AbortSignal.timeout(5000) });
       const body = await res.json();
       contextWindows = Object.fromEntries((body.data || []).map((m) => [m.id, m.context_length]));
     } catch {
@@ -216,7 +224,7 @@ async function startAgent(win, { runId, threadId, prompt, cwd, model }) {
 async function request({ url, method = "GET", body, auth = true, claim }) {
   if (!url.startsWith("https://openuncensored.com/")) return { status: 0, json: { error: "blocked" } };
   const key = readKey();
-  const headers = { "Content-Type": "application/json", "X-Title": "Open Uncensored Desktop", "X-OU-Install": installId() };
+  const headers = { "Content-Type": "application/json", "X-Title": "OpenUncensored Desktop", "X-OU-Install": installId() };
   if (auth && key) headers.Authorization = `Bearer ${key}`;
   if (claim) headers.Authorization = `Bearer ${claim}`; // agent checkout polling
   try {
@@ -239,7 +247,7 @@ async function chatStream(win, { streamId, model, messages }) {
   try {
     const res = await fetch(`${API}/chat/completions`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "X-Title": "Open Uncensored Desktop" },
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "X-Title": "OpenUncensored Desktop" },
       body: JSON.stringify({ model, messages, stream: true }),
       signal: ctrl.signal,
     });
@@ -332,9 +340,18 @@ function createWindow() {
     const r = await dialog.showOpenDialog(win, { properties: ["openFile", "multiSelections"] });
     return r.canceled ? [] : r.filePaths;
   });
-  // Conversations without a project work in ~/Open Uncensored.
+  // Conversations without a project work in ~/OpenUncensored (~/Open Uncensored before 0.1.8,
+  // moved over once; if it cannot be moved the old folder keeps being used).
   ipcMain.handle("folder:default", () => {
-    const dir = path.join(app.getPath("home"), "Open Uncensored");
+    const dir = path.join(app.getPath("home"), "OpenUncensored");
+    const old = path.join(app.getPath("home"), "Open Uncensored");
+    if (!fs.existsSync(dir) && fs.existsSync(old)) {
+      try {
+        fs.renameSync(old, dir);
+      } catch {
+        return old;
+      }
+    }
     fs.mkdirSync(dir, { recursive: true });
     return dir;
   });
@@ -376,7 +393,33 @@ function createWindow() {
   });
 }
 
+// Electron's default menu takes its labels from app.name, which stays "Open Uncensored" (above).
+function setMenu() {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: DISPLAY_NAME,
+        submenu: [
+          { role: "about", label: `About ${DISPLAY_NAME}` },
+          { type: "separator" },
+          { role: "services" },
+          { type: "separator" },
+          { role: "hide", label: `Hide ${DISPLAY_NAME}` },
+          { role: "hideOthers" },
+          { role: "unhide" },
+          { type: "separator" },
+          { role: "quit", label: `Quit ${DISPLAY_NAME}` },
+        ],
+      },
+      { role: "editMenu" },
+      { role: "viewMenu" },
+      { role: "windowMenu" },
+    ]),
+  );
+}
+
 app.whenReady().then(() => {
+  setMenu();
   createWindow();
   installId();
   if (freshInstall) appEvent("app_install");

@@ -1,8 +1,8 @@
 {
   "name": "open-uncensored-desktop",
-  "productName": "Open Uncensored",
-  "version": "0.1.7",
-  "description": "Chat and a coding agent on uncensored models, from Open Uncensored.",
+  "productName": "OpenUncensored",
+  "version": "0.1.8",
+  "description": "Chat and a coding agent on uncensored models, from OpenUncensored.",
   "license": "MIT",
   "private": true,
   "main": "electron/main.cjs",
@@ -31,7 +31,7 @@
   },
   "build": {
     "appId": "com.openuncensored.desktop",
-    "productName": "Open Uncensored",
+    "productName": "OpenUncensored",
     "directories": {
       "output": "release"
     },
@@ -66,7 +66,7 @@
       "hardenedRuntime": false
     },
     "dmg": {
-      "title": "Open Uncensored"
+      "title": "OpenUncensored"
     },
     "extraResources": [
       {
@@ -78,7 +78,7 @@
         "to": "THIRD_PARTY_NOTICES.md"
       }
     ],
-    "artifactName": "Open-Uncensored-${version}-mac-${arch}.${ext}"
+    "artifactName": "OpenUncensored-${version}-mac-${arch}.${ext}"
   },
   "repository": {
     "type": "git",
