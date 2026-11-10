@@ -5,7 +5,9 @@ import logo from "./logo.svg";
 import { ModelPicker } from "./ModelPicker";
 
 // Drives tools reliably through the agent; the default for new conversations.
-const DEFAULT_MODEL = "glm-5.3-flash-uncensored";
+// New chats start on the #1 model in the rankings; this is only used until the list has loaded.
+const DEFAULT_MODEL = "deepseek-v4.1-flash-1017-uncensored";
+const topModel = (models: ModelInfo[]) => models.find((m) => m.rank === 1)?.id ?? DEFAULT_MODEL;
 const PACKS = [1000, 2500, 5000];
 const DEFAULT_TITLE = "New conversation";
 
@@ -65,6 +67,19 @@ export default function App() {
     fetchModels().then(setModels).catch(() => setModels([]));
   }, []);
 
+  // A chat made before the model list arrived starts on DEFAULT_MODEL: move it to the current #1
+  // unless the user already sent a message or picked a model.
+  useEffect(() => {
+    const top = models.find((m) => m.rank === 1)?.id;
+    if (!top) return;
+    setConvos((list) => {
+      if (!list.some((c) => c.turns.length === 0 && !c.modelPicked && c.model !== top)) return list;
+      const next = list.map((c) => (c.turns.length === 0 && !c.modelPicked ? { ...c, model: top } : c));
+      persist(next);
+      return next;
+    });
+  }, [models]);
+
   const refreshCredit = useCallback(() => {
     if (key) balance().then(setCredit);
   }, [key]);
@@ -94,7 +109,7 @@ export default function App() {
       id: uid(),
       kind: "agent",
       title: pick ? folderName(folder) : DEFAULT_TITLE,
-      model: DEFAULT_MODEL,
+      model: topModel(models),
       folder,
       turns: [],
       updated: Date.now(),
@@ -612,7 +627,7 @@ function AgentView({
         setDraft={setDraft}
         onSend={send}
         onStop={() => runRef.current && window.ou.stopAgent(runRef.current)}
-        picker={<ModelPicker value={convo.model} models={models} onChange={(m) => update(convo.id, (c) => ({ ...c, model: m }))} />}
+        picker={<ModelPicker value={convo.model} models={models} onChange={(m) => update(convo.id, (c) => ({ ...c, model: m, modelPicked: true }))} />}
       />
     </>
   );

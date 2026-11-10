@@ -38,6 +38,7 @@ export interface Conversation {
   folder?: string; // agent mode: the project folder
   threadId?: string; // agent mode: Codex thread to resume
   named?: boolean; // the user renamed it: never auto-title over it
+  modelPicked?: boolean; // the user chose the model: never switch it to the current #1
   turns: Turn[];
   updated: number;
 }

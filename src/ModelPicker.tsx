@@ -19,7 +19,9 @@ export function ModelPicker({ value, models, onChange }: { value: string; models
   const current = models.find((m) => m.id === value);
 
   const bestAgent = useMemo(
-    () => [...models].filter((m) => m.rank).sort((a, b) => (b.agentic ?? 0) - (a.agentic ?? 0))[0]?.id,
+    // The strongest agent among the top 5 overall: a model far down the ranking with one good agent
+    // score (often a slow one) should not be the one we point people to for agent work.
+    () => [...models].filter((m) => m.rank && m.rank <= 5).sort((a, b) => (b.agentic ?? 0) - (a.agentic ?? 0))[0]?.id,
     [models],
   );
   const filtered = useMemo(() => {
