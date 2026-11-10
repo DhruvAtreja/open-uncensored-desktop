@@ -24,11 +24,8 @@ It downloads the latest release from this repo, checks it against the published 
 **OpenUncensored** in Applications and opens it. After that the app updates itself: new versions
 download in the background and the sidebar shows **Relaunch to update**.
 
-Or download the DMG from [Releases](https://github.com/DhruvAtreja/open-uncensored-desktop/releases/latest)
-and drag the app to Applications. The app is not notarized by Apple yet, so a browser download is
-blocked on first launch ("Apple could not verify..."): click **Done**, open **System Settings →
-Privacy & Security**, and click **Open Anyway** next to OpenUncensored. The Terminal install does not
-need this step.
+That is the only way to install it: the app is not notarized by Apple yet, so the script installs
+the release zip and clears the download flag that would otherwise make macOS block the first launch.
 
 ## How it works
 
@@ -48,7 +45,7 @@ need this step.
 ```bash
 npm install
 npm start      # build the interface and open the app
-npm run dist   # macOS arm64 DMG in release/
+npm run dist   # macOS arm64 zip in release/ (the file install.sh and the updater use)
 ```
 
 End-to-end check without clicking (development only): set `OU_DEV_KEY` to an OpenUncensored key,
