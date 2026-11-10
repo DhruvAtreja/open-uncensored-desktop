@@ -1,4 +1,4 @@
-// Electron main process: the window, the API key (encrypted with the OS keychain), saved
+// Electron main process: the window, the API key (a user-only file in the data folder), saved
 // conversations, and the coding agent, which is the open source Codex CLI pointed at the
 // OpenUncensored API (it speaks the Responses API, which the router serves at /v1/responses).
 const { app, BrowserWindow, Menu, dialog, ipcMain, safeStorage, shell } = require("electron");
@@ -21,23 +21,50 @@ const data = (...p) => path.join(app.getPath("userData"), ...p);
 
 // ---------------------------------------------------------------------------- key
 
+// The key lives in a file only this user can read (mode 0600 in the app's data folder), the way
+// CLI tools keep API keys. Up to 0.1.8 it was encrypted with the macOS Keychain, but the app is
+// not signed with a stable Developer ID, so every update looked like a new app and macOS asked
+// for the login password again. A key saved by an older version (key.bin) is decrypted once,
+// which is the last Keychain prompt, moved to the plain file, and the old file removed.
+const KEY_FILE = "api-key";
+const LEGACY_KEY_FILE = "key.bin";
+let keyCache;
+
+function saveKeyFile(key) {
+  const file = data(KEY_FILE);
+  fs.writeFileSync(file, key, { mode: 0o600 });
+  fs.chmodSync(file, 0o600); // writeFileSync keeps the mode of a file that already exists
+}
+
 function readKey() {
   if (!app.isPackaged && process.env.OU_DEV_KEY) return process.env.OU_DEV_KEY; // development only
+  if (keyCache !== undefined) return keyCache;
   try {
-    const raw = fs.readFileSync(data("key.bin"));
-    return safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(raw) : raw.toString("utf8");
+    keyCache = fs.readFileSync(data(KEY_FILE), "utf8").trim() || null;
+    return keyCache;
+  } catch {}
+  try {
+    const raw = fs.readFileSync(data(LEGACY_KEY_FILE));
+    const key = safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(raw) : raw.toString("utf8");
+    if (key) {
+      saveKeyFile(key);
+      fs.rmSync(data(LEGACY_KEY_FILE), { force: true });
+    }
+    keyCache = key || null;
   } catch {
-    return null;
+    keyCache = null; // no key yet, or the user declined the one-time Keychain prompt
   }
+  return keyCache;
 }
 
 function writeKey(key) {
+  keyCache = key || null;
+  fs.rmSync(data(LEGACY_KEY_FILE), { force: true });
   if (!key) {
-    fs.rmSync(data("key.bin"), { force: true });
+    fs.rmSync(data(KEY_FILE), { force: true });
     return;
   }
-  const raw = safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(key) : Buffer.from(key, "utf8");
-  fs.writeFileSync(data("key.bin"), raw, { mode: 0o600 });
+  saveKeyFile(key);
 }
 
 // ---------------------------------------------------------------------------- usage events
