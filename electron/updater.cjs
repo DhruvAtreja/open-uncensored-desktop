@@ -10,6 +10,11 @@
 //      replaces the app bundle (keeping the old one until the new one is in place), clears the
 //      quarantine flag and opens the new version.
 // Development builds and copies running from a DMG or a translocated path never update themselves.
+//
+// Windows: the release's "-win-<arch>.exe" installer (per-user NSIS, no admin) is downloaded and
+// checked the same way, then run silently with --force-run, which replaces the app and reopens it.
+// A download made by the app itself carries no "from the internet" mark, so SmartScreen does not
+// stop it the way it stops a browser download of the same unsigned installer.
 const { app } = require("electron");
 const { execFile, spawn } = require("node:child_process");
 const crypto = require("node:crypto");
@@ -52,7 +57,13 @@ function currentBundle() {
   return i < 0 ? null : exe.slice(0, i + 4);
 }
 
+const IS_WIN = process.platform === "win32";
+
 function canSelfUpdate() {
+  if (IS_WIN) {
+    // Only the installed app (under %LOCALAPPDATA%\Programs), never a portable or unpacked copy.
+    return app.isPackaged && !process.env.PORTABLE_EXECUTABLE_DIR && /\\Programs\\/i.test(app.getPath("exe"));
+  }
   const bundle = currentBundle();
   if (!app.isPackaged || process.platform !== "darwin" || !bundle) return false;
   if (bundle.startsWith("/Volumes/") || bundle.includes("/AppTranslocation/")) return false;
@@ -74,7 +85,8 @@ async function check() {
     const version = String(release.tag_name || "").replace(/^v/, "");
     if (!version || !newer(version, app.getVersion())) return set({ status: "idle" });
     const arch = process.arch === "arm64" ? "arm64" : "x64";
-    const asset = (release.assets || []).find((a) => a.name.endsWith(`-mac-${arch}.zip`));
+    const suffix = IS_WIN ? `-win-${arch}.exe` : `-mac-${arch}.zip`;
+    const asset = (release.assets || []).find((a) => a.name.endsWith(suffix));
     if (!asset) return set({ status: "idle" });
 
     const dir = path.join(app.getPath("userData"), "update");
@@ -93,6 +105,8 @@ async function check() {
       await pipeline(fs.createReadStream(zip), hash);
       if (hash.digest("hex") !== want) throw new Error("download does not match the published checksum");
     }
+
+    if (IS_WIN) return set({ status: "ready", version, app: zip }); // the installer itself
 
     const out = path.join(dir, "app");
     await run("/usr/bin/ditto", ["-x", "-k", zip, out]);
@@ -115,6 +129,12 @@ function checkNow() {
 
 function install() {
   if (state.status !== "ready") return false;
+  if (IS_WIN) {
+    // /S: silent, per-user install over the current one; --force-run: reopen the app afterwards.
+    spawn(state.app, ["/S", "--force-run"], { detached: true, stdio: "ignore" }).unref();
+    app.quit();
+    return true;
+  }
   const bundle = currentBundle();
   const next = state.app;
   const backup = `${bundle}.old`;

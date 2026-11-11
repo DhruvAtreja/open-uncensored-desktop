@@ -116,13 +116,19 @@ function writeConversations(list) {
 
 // ---------------------------------------------------------------------------- agent (Codex)
 
+const IS_WIN = process.platform === "win32";
+
+// The Codex CLI for this platform, from the matching @openai/codex-<os>-<arch> package (npm installs
+// only the one for the machine that builds the app, so each platform's build carries its own).
 function codexBinary() {
-  const arch = process.arch === "arm64" ? "aarch64-apple-darwin" : "x86_64-apple-darwin";
-  const pkg = process.arch === "arm64" ? "codex-darwin-arm64" : "codex-darwin-x64";
+  const arm = process.arch === "arm64";
+  const [pkg, triple] = IS_WIN
+    ? [arm ? "codex-win32-arm64" : "codex-win32-x64", arm ? "aarch64-pc-windows-msvc" : "x86_64-pc-windows-msvc"]
+    : [arm ? "codex-darwin-arm64" : "codex-darwin-x64", arm ? "aarch64-apple-darwin" : "x86_64-apple-darwin"];
   const base = app.isPackaged
-    ? path.join(process.resourcesPath, "app.asar.unpacked", "node_modules", "@openai", pkg, "vendor", arch)
-    : path.join(__dirname, "..", "node_modules", "@openai", pkg, "vendor", arch);
-  return { bin: path.join(base, "bin", "codex"), toolsDir: path.join(base, "codex-path") };
+    ? path.join(process.resourcesPath, "app.asar.unpacked", "node_modules", "@openai", pkg, "vendor", triple)
+    : path.join(__dirname, "..", "node_modules", "@openai", pkg, "vendor", triple);
+  return { bin: path.join(base, "bin", IS_WIN ? "codex.exe" : "codex"), toolsDir: path.join(base, "codex-path") };
 }
 
 // The image generation tool (image-tool.cjs), an MCP server the agent can call. It runs on the app's
@@ -223,7 +229,7 @@ async function startAgent(win, { runId, threadId, prompt, cwd, model }) {
   else args.push(prompt);
   const child = spawn(bin, args, {
     cwd,
-    env: { ...process.env, OU_API_KEY: key, OU_IMAGE_DIR: cwd, CODEX_HOME: codexHome(), PATH: `${toolsDir}:${process.env.PATH}` },
+    env: { ...process.env, OU_API_KEY: key, OU_IMAGE_DIR: cwd, CODEX_HOME: codexHome(), PATH: `${toolsDir}${path.delimiter}${process.env.PATH}` },
     stdio: ["ignore", "pipe", "pipe"],
   });
   runs.set(runId, child);
@@ -325,8 +331,11 @@ function createWindow() {
     minWidth: 860,
     minHeight: 560,
     backgroundColor: "#181818",
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 18 },
+    // Mac: traffic lights inset into the app's own 52px header. Windows: the native minimize,
+    // maximize and close buttons drawn over the right end of that header (the page leaves room).
+    ...(IS_WIN
+      ? { titleBarStyle: "hidden", titleBarOverlay: { color: "#181818", symbolColor: "#b8b8b8", height: 52 } }
+      : { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 18 } }),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -383,7 +392,7 @@ function createWindow() {
     return dir;
   });
   ipcMain.handle("open:url", (_e, url) => /^https:\/\//.test(url) && shell.openExternal(url));
-  // Pictures the image tool saved, shown inline in the chat and opened in Preview on click.
+  // Pictures the image tool saved, shown inline in the chat and opened in the default image viewer on click.
   // Only image files, so the page cannot read or open anything else through these.
   const isImage = (p) => typeof p === "string" && path.isAbsolute(p) && /\.(png|jpe?g|webp)$/i.test(p);
   ipcMain.handle("image:read", (_e, file) => {
@@ -422,6 +431,8 @@ function createWindow() {
 
 // Electron's default menu takes its labels from app.name, which stays "Open Uncensored" (above).
 function setMenu() {
+  // Windows: no menu bar (the title bar is the app's own header). Text editing shortcuts work without it.
+  if (IS_WIN) return Menu.setApplicationMenu(null);
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       {

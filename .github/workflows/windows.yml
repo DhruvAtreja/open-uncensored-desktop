@@ -1,0 +1,73 @@
+# Builds the Windows installer, installs it silently on a clean Windows runner, checks that the app,
+# the bundled Codex CLI and the image tool all run, screenshots the window, and (when a tag is
+# given) attaches the installer to that GitHub release next to the Mac zip.
+name: Windows build
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the installer to (e.g. v0.1.11); empty = build and test only"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build installer
+        run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Install silently
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem release -Filter "OpenUncensored-Setup-*-win-x64.exe" | Select-Object -First 1
+          Write-Host "installer: $($setup.Name) $([math]::Round($setup.Length / 1MB)) MB"
+          Start-Process $setup.FullName -ArgumentList "/S" -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "OpenUncensored.exe" | Select-Object -First 1
+          if (-not $exe) { throw "app not installed" }
+          Write-Host "installed at $($exe.DirectoryName)"
+          "APP_DIR=$($exe.DirectoryName)" | Out-File $env:GITHUB_ENV -Append
+      - name: Codex and image tool run
+        run: node scripts/win-smoke.cjs "${{ env.APP_DIR }}"
+      - name: App launches and renders
+        shell: pwsh
+        run: |
+          $data = Join-Path $env:RUNNER_TEMP "ou-data"
+          New-Item -ItemType Directory -Force $data | Out-Null
+          Set-Content -NoNewline (Join-Path $data "api-key") "ou-ci-smoke-test"
+          $p = Start-Process "$env:APP_DIR\OpenUncensored.exe" -ArgumentList "--user-data-dir=$data" -PassThru
+          Start-Sleep -Seconds 20
+          if ($p.HasExited) { throw "app exited with code $($p.ExitCode)" }
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$env:RUNNER_TEMP\app.png")
+          Write-Host "app running (pid $($p.Id)) after 20 s"
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-build
+          path: |
+            release/OpenUncensored-Setup-*-win-x64.exe
+            ${{ runner.temp }}/app.png
+          if-no-files-found: warn
+      - name: Attach to release
+        if: ${{ inputs.tag != '' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $setup = Get-ChildItem release -Filter "OpenUncensored-Setup-*-win-x64.exe" | Select-Object -First 1
+          gh release upload "${{ inputs.tag }}" $setup.FullName --clobber

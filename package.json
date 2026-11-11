@@ -10,7 +10,8 @@
     "dev": "vite",
     "build": "vite build",
     "start": "vite build && electron .",
-    "dist": "vite build && electron-builder --mac --arm64"
+    "dist": "vite build && electron-builder --mac --arm64",
+    "dist:win": "vite build && electron-builder --win --x64 --publish never"
   },
   "dependencies": {
     "@openai/codex": "0.163.0",
@@ -43,6 +44,7 @@
     ],
     "asarUnpack": [
       "node_modules/@openai/codex-darwin-*/**",
+      "node_modules/@openai/codex-win32-*/**",
       "electron/image-tool.cjs"
     ],
     "mac": {
@@ -57,7 +59,8 @@
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.png",
       "identity": "-",
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "artifactName": "OpenUncensored-${version}-mac-${arch}.${ext}"
     },
     "dmg": {
       "title": "OpenUncensored"
@@ -72,7 +75,28 @@
         "to": "THIRD_PARTY_NOTICES.md"
       }
     ],
-    "artifactName": "OpenUncensored-${version}-mac-${arch}.${ext}"
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "OpenUncensored-Setup-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "OpenUncensored",
+      "uninstallDisplayName": "OpenUncensored",
+      "deleteAppDataOnUninstall": false
+    }
   },
   "repository": {
     "type": "git",

@@ -5,6 +5,11 @@ import logo from "./logo.svg";
 import { ModelPicker } from "./ModelPicker";
 
 // Drives tools reliably through the agent; the default for new conversations.
+// Windows draws its minimize/maximize/close buttons over the right of the 52px header; Mac puts its
+// traffic lights on the left. Labels use the platform's modifier key.
+const WIN = window.ou.platform === "win32";
+const MOD = WIN ? "Ctrl+" : "⌘";
+
 // New chats start on the #1 model in the rankings; this is only used until the list has loaded.
 const DEFAULT_MODEL = "deepseek-v4.1-flash-1017-uncensored";
 const topModel = (models: ModelInfo[]) => models.find((m) => m.rank === 1)?.id ?? DEFAULT_MODEL;
@@ -138,10 +143,10 @@ export default function App() {
     <div className="flex h-full text-fg">
       {sidebar && (
       <aside style={{ width }} className="relative flex shrink-0 flex-col border-r border-white/[0.06] bg-ink-2">
-        <div className="drag flex h-[52px] shrink-0 items-center pl-[84px] pr-2">
+        <div className={`drag flex h-[52px] shrink-0 items-center pr-2 ${WIN ? "pl-3" : "pl-[84px]"}`}>
           <img src={logo} alt="" className="h-[18px] w-[18px] rounded-[5px]" />
           <span className="ml-2 min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight">OpenUncensored</span>
-          <button onClick={() => setSidebar(false)} title="Hide sidebar (⌘\)" className="no-drag rounded-md p-1.5 text-fg-3 hover:bg-white/[0.07] hover:text-fg">
+          <button onClick={() => setSidebar(false)} title={`Hide sidebar (${MOD}\\)`} className="no-drag rounded-md p-1.5 text-fg-3 hover:bg-white/[0.07] hover:text-fg">
             <Sidebar className="h-4 w-4" />
           </button>
         </div>
@@ -273,7 +278,7 @@ function SidebarToggle({ open, onOpen }: { open: boolean; onOpen: () => void }) 
   if (open) return null;
   return (
     <>
-      <button onClick={onOpen} title="Show sidebar (⌘\)" className="no-drag ml-[72px] rounded-md p-1.5 text-fg-3 hover:bg-white/[0.07] hover:text-fg">
+      <button onClick={onOpen} title={`Show sidebar (${MOD}\\)`} className={`no-drag rounded-md p-1.5 text-fg-3 hover:bg-white/[0.07] hover:text-fg ${WIN ? "ml-1" : "ml-[72px]"}`}>
         <Sidebar className="h-4 w-4" />
       </button>
       {ready && (
@@ -557,7 +562,7 @@ function AgentView({
 
   return (
     <>
-      <header className="drag flex h-[52px] shrink-0 items-center gap-3 border-b border-white/[0.06] pl-3 pr-6">
+      <header className={`drag flex h-[52px] shrink-0 items-center gap-3 border-b border-white/[0.06] pl-3 ${WIN ? "pr-[150px]" : "pr-6"}`}>
         {bar}
         <div className="min-w-0 flex-1 pl-3">
           {editingTitle ? (
@@ -633,7 +638,12 @@ function AgentView({
   );
 }
 
-const cleanCommand = (cmd: string) => cmd.replace(/^\/bin\/(zsh|bash) -lc /, "").replace(/^(["'])([\s\S]*)\1$/, "$2");
+// Shell wrappers Codex adds around a command: /bin/zsh -lc on Mac, PowerShell -Command on Windows.
+const cleanCommand = (cmd: string) =>
+  cmd
+    .replace(/^\/bin\/(zsh|bash) -lc /, "")
+    .replace(/^"?[^"\s]*(powershell|pwsh)(\.exe)?"?\s+(-NoLogo\s+|-NoProfile\s+)*-Command\s+/i, "")
+    .replace(/^(["'])([\s\S]*)\1$/, "$2");
 
 function AgentItemView({ item }: { item: AgentItem }) {
   const [open, setOpen] = useState(false);
@@ -847,13 +857,13 @@ function Settings({
         <div className="mt-5 rounded-xl bg-white/[0.03] p-4">
           <p className="text-[12px] text-fg-3">Balance</p>
           <p className="mt-0.5 text-[28px] font-semibold tabular-nums tracking-tight">{typeof credit === "number" ? `$${credit.toFixed(2)}` : "–"}</p>
-          <p className="mt-1 text-[11.5px] text-fg-3">Key ending …{apiKey.slice(-4)}, stored encrypted in your keychain</p>
+          <p className="mt-1 text-[11.5px] text-fg-3">Key ending …{apiKey.slice(-4)}, stored only on this computer</p>
         </div>
         <p className="mb-2.5 mt-5 text-[13px] font-medium">Add credit</p>
         <Purchase topUpKey={apiKey} onDone={onRefresh} />
         <div className="mt-6 flex items-center justify-between border-t border-white/[0.06] pt-4">
           <button onClick={onSignOut} className="text-[12px] text-fg-3 transition-colors hover:text-bad">
-            Remove key from this Mac
+            Remove key from this {WIN ? "PC" : "Mac"}
           </button>
           <UpdateLine />
         </div>

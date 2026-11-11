@@ -53,6 +53,7 @@ export interface UpdateState {
 declare global {
   interface Window {
     ou: {
+      platform: string;
       getKey(): Promise<string | null>;
       setKey(key: string | null): Promise<void>;
       getConversations(): Promise<Conversation[]>;
