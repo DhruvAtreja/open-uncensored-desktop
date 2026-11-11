@@ -84,6 +84,18 @@ async function runTask(win, label, prompt, timeoutMs) {
   check("image shown inline in the chat", inline > 0, `${inline} inline images`);
   check("no image error shown", !/Image generation failed/i.test(imageText));
 
+  // Editing: the agent reuses its own picture as a reference image (POST /images/edits).
+  const editText = await runTask(
+    win,
+    "02b-edit",
+    "Use the fox picture you just made as a reference image and draw the same fox sitting in a green summer meadow. Name the file fox-summer.",
+    300_000,
+  );
+  const edited = fs.readdirSync(folder).filter((f) => /summer.*\.(png|jpe?g|webp)$/i.test(f));
+  check("edited image saved from the reference picture", edited.length > 0, edited.join(", "));
+  check("edit ran on an editing model", /qwen-edit-uncensored|seedream|kontext|klein|qwen-image-3-edit/i.test(editText));
+  check("no editing error shown", !/editing failed|Image generation failed/i.test(editText.split("summer meadow")[1] ?? ""));
+
   const codeText = await runTask(
     win,
     "03-code",

@@ -14,6 +14,8 @@ const readline = require("node:readline");
 
 const API = process.env.OU_API_BASE || "https://openuncensored.com/api/v1";
 const DEFAULT_MODEL = "z-image-turbo";
+const DEFAULT_EDIT_MODEL = "qwen-edit-uncensored"; // when reference images are given
+const MAX_REF_BYTES = 20 * 1024 * 1024;
 const SIZES = ["1024x1024", "1024x1536", "1536x1024", "1024x1792", "1792x1024", "512x512"];
 
 const TOOLS = [
@@ -23,7 +25,10 @@ const TOOLS = [
       "Generate images from a text prompt with an uncensored image model (adult content allowed; nothing involving minors or real people without consent). " +
       "Saves the images as files in the working folder (or `directory`) and returns their paths. Each image is billed to the user's OpenUncensored credits, about $0.01 to $0.04. " +
       "Call list_image_models to see every model. Good picks: z-image-turbo (fast photoreal, default), lustify-v8 (explicit photo), " +
-      "wai-illustrious (anime; start the prompt with 'masterpiece, best quality'), pony-diffusion-v6 (stylised; start with 'score_9, score_8_up, score_7_up'), chroma (strong prompt following).",
+      "wai-illustrious (anime; start the prompt with 'masterpiece, best quality'), pony-diffusion-v6 (stylised; start with 'score_9, score_8_up, score_7_up'), chroma (strong prompt following). " +
+      "To keep a character, person or object from existing pictures (same face and outfit in a new scene, a new pose, a restyle), pass their file paths as reference_images: " +
+      "the default model is then qwen-edit-uncensored (up to 3 references, adult content allowed); seedream-v5-5-edit keeps one character most consistently (up to 10). " +
+      "In the prompt, say what must stay the same and what changes.",
     inputSchema: {
       type: "object",
       properties: {
@@ -32,6 +37,17 @@ const TOOLS = [
         size: { type: "string", enum: SIZES, description: "Image size. Default 1024x1024." },
         n: { type: "integer", minimum: 1, maximum: 4, description: "Number of images, 1 to 4. Default 1." },
         negative_prompt: { type: "string", description: "What to keep out of the image (used by the Civitai models)." },
+        reference_images: {
+          type: "array",
+          items: { type: "string" },
+          description: "Paths of existing pictures (PNG, JPEG, WebP) to keep the character or subject from. Relative paths are in the working folder.",
+        },
+        strength: {
+          type: "number",
+          minimum: 0,
+          maximum: 1,
+          description: "Only for image to image on the Civitai SDXL models with one reference: 0 keeps the picture, 1 redraws freely. Default 0.6.",
+        },
         filename: { type: "string", description: "Base file name without extension. Default: derived from the prompt." },
         directory: { type: "string", description: "Absolute folder to save into. Default: the conversation's working folder." },
       },
@@ -88,17 +104,37 @@ async function generateImage(args) {
   if (!process.env.OU_API_KEY) return text("No OpenUncensored API key is set in the app.", { isError: true });
   const prompt = String(args.prompt || "").trim();
   if (!prompt) return text("prompt is required.", { isError: true });
-  const model = String(args.model || DEFAULT_MODEL);
-  const n = Math.max(1, Math.min(4, Number(args.n) || 1));
   const dir = path.resolve(String(args.directory || process.env.OU_IMAGE_DIR || process.cwd()));
+  const refs = Array.isArray(args.reference_images) ? args.reference_images.map(String).filter(Boolean) : [];
+  const model = String(args.model || (refs.length ? DEFAULT_EDIT_MODEL : DEFAULT_MODEL));
+  const n = Math.max(1, Math.min(4, Number(args.n) || 1));
   const body = { model, prompt, n, response_format: "b64_json" };
   if (args.size && SIZES.includes(args.size)) body.size = args.size;
   if (args.negative_prompt) body.negative_prompt = String(args.negative_prompt);
+  if (refs.length) {
+    // Reference images go to POST /images/edits as data URLs (read here, so the agent only names files).
+    const images = [];
+    for (const ref of refs) {
+      const file = path.isAbsolute(ref) ? ref : path.join(dir, ref);
+      let buf;
+      try {
+        if (fs.statSync(file).size > MAX_REF_BYTES) return text(`${file} is larger than 20 MB.`, { isError: true });
+        buf = fs.readFileSync(file);
+      } catch {
+        return text(`Reference image not found: ${file}`, { isError: true });
+      }
+      const ext = extOf(buf);
+      const mime = ext === "jpg" ? "image/jpeg" : `image/${ext}`;
+      images.push(`data:${mime};base64,${buf.toString("base64")}`);
+    }
+    body.images = images;
+    if (typeof args.strength === "number") body.strength = args.strength;
+  }
   let data;
   try {
-    data = await api("/images/generations", { method: "POST", body: JSON.stringify(body) });
+    data = await api(refs.length ? "/images/edits" : "/images/generations", { method: "POST", body: JSON.stringify(body) });
   } catch (e) {
-    return text(`Image generation failed: ${e.message}`, { isError: true });
+    return text(`Image ${refs.length ? "editing" : "generation"} failed: ${e.message}`, { isError: true });
   }
   fs.mkdirSync(dir, { recursive: true });
   const base = slugify(args.filename || prompt);
@@ -125,9 +161,16 @@ async function generateImage(args) {
 async function listModels() {
   try {
     const body = await api("/images/models");
-    const lines = (body.data || []).map(
-      (m) => `${m.id}: ${m.name}, about $${Number(m.price_per_image_usd).toFixed(4)} per image. ${m.description || ""}`,
-    );
+    const lines = (body.data || []).map((m) => {
+      const ops = m.operations || ["generate"];
+      const kind =
+        m.edit_mode === "reference"
+          ? ` [needs reference_images, up to ${m.max_input_images}]`
+          : ops.includes("edit")
+            ? " [also image to image with one reference_images entry]"
+            : "";
+      return `${m.id}: ${m.name}, about $${Number(m.price_per_image_usd).toFixed(4)} per image.${kind} ${m.description || ""}`;
+    });
     return text(lines.join("\n") || "No image models are available right now.");
   } catch (e) {
     return text(`Could not list image models: ${e.message}`, { isError: true });

@@ -540,12 +540,12 @@ function AgentView({
             case "mcp_tool_call": {
               // The image tool (electron/image-tool.cjs); other MCP tools are not configured.
               if (item.tool !== "generate_image") break;
-              const args = (item.arguments ?? {}) as { prompt?: string; model?: string };
+              const args = (item.arguments ?? {}) as { prompt?: string; model?: string; reference_images?: string[] };
               const result = (item.result ?? {}) as { content?: { type: string; text?: string }[]; structured_content?: { files?: string[] } };
               const files = result.structured_content?.files ?? [];
               const text = (result.content ?? []).map((c) => c.text ?? "").join("\n");
               const error = (item.error as { message?: string } | null)?.message ?? (item.status === "failed" || (!files.length && type === "item.completed") ? text || "Image generation failed." : "");
-              upsert({ kind: "image", id, prompt: String(args.prompt ?? ""), model: String(args.model ?? "z-image-turbo"), files, error, running: type !== "item.completed" });
+              upsert({ kind: "image", id, prompt: String(args.prompt ?? ""), model: String(args.model ?? (Array.isArray(args.reference_images) && args.reference_images.length ? "qwen-edit-uncensored" : "z-image-turbo")), files, error, running: type !== "item.completed" });
               break;
             }
             case "error":
