@@ -27,6 +27,19 @@ download in the background and the sidebar shows **Relaunch to update**.
 That is the only way to install it: the app is not notarized by Apple yet, so the script installs
 the release zip and clears the download flag that would otherwise make macOS block the first launch.
 
+### Windows
+
+Windows 10 or 11, 64-bit. In PowerShell:
+
+```powershell
+irm https://openuncensored.com/install.ps1 | iex
+```
+
+Or download the installer from [openuncensored.com/download](https://openuncensored.com/download#windows). It is not
+code-signed yet, so Windows may show "Windows protected your PC": click **More info**, then **Run anyway**. The app
+installs for your user only (no admin rights) and updates itself. The Windows installer is built and smoke-tested on a
+clean Windows runner by `.github/workflows/windows.yml` and attached to each release.
+
 ## How it works
 
 - `electron/main.cjs`: the window, the API key (encrypted with the OS keychain), saved conversations, all
