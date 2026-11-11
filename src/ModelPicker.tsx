@@ -18,12 +18,6 @@ export function ModelPicker({ value, models, onChange }: { value: string; models
   const root = useRef<HTMLDivElement>(null);
   const current = models.find((m) => m.id === value);
 
-  const bestAgent = useMemo(
-    // The strongest agent among the top 5 overall: a model far down the ranking with one good agent
-    // score (often a slow one) should not be the one we point people to for agent work.
-    () => [...models].filter((m) => m.rank && m.rank <= 5).sort((a, b) => (b.agentic ?? 0) - (a.agentic ?? 0))[0]?.id,
-    [models],
-  );
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? models.filter((m) => m.name.toLowerCase().includes(q) || m.id.includes(q)) : models;
@@ -56,7 +50,6 @@ export function ModelPicker({ value, models, onChange }: { value: string; models
       <span className="w-7 shrink-0 font-mono text-[11px] text-fg-3">{m.rank ? `#${m.rank}` : ""}</span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[13px] text-fg">{m.name}</span>
-        {m.id === bestAgent && <span className="block text-[11px] text-orange">Best at agent tasks</span>}
       </span>
       {m.rank && m.score !== null && (
         <span className={`shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[11px] tabular-nums ${scoreTone(m.score)}`}>{m.score.toFixed(0)}</span>
