@@ -105,6 +105,24 @@ async function runTask(win, label, prompt, timeoutMs) {
   check("commands shown without the PowerShell wrapper", !/(powershell|pwsh)(\.exe)?"?\s+(-\w+\s+)*-Command/i.test(codeText));
   check("agent used PowerShell syntax first time (no bash heredoc)", !/<<\s*'?EOF/.test(codeText));
 
+  // Branching: continue from the image reply in a new conversation; the original stays as it is.
+  const origTitle = (await win.locator("header").first().innerText()).split("\n")[0].trim();
+  await win.getByText("Branch from here").first().click({ force: true });
+  await win.getByText(/^Branched from /).first().waitFor({ timeout: 10_000 });
+  const branchText0 = await win.locator("main").innerText();
+  check("branch opens with the turns up to that reply", branchText0.includes("red fox") && !branchText0.includes("fib.py"));
+  const memo = await runTask(win, "05-branch", "What file name did you give the image you made earlier? Reply with just the file name.", 180_000);
+  check("branch remembers the earlier conversation", /fox[-\w]*\.png/i.test(memo.split("What file name")[1] ?? ""), (memo.split("What file name")[1] ?? "").replace(/\s+/g, " ").slice(0, 160));
+  await win.getByText(/^Branched from /).first().click();
+  await win.waitForTimeout(1000);
+  const backText = await win.locator("main").innerText();
+  check("original conversation unchanged", backText.includes("fib.py") && !backText.includes("What file name"), origTitle);
+  await win.getByText("Edit in a branch").first().click({ force: true });
+  await win.waitForTimeout(1000);
+  const composer = await win.locator('textarea[placeholder="Ask anything, or describe a task"]').inputValue();
+  check("edit in a branch puts the message in the composer", composer.startsWith("Generate one picture"), composer.slice(0, 60));
+  await win.screenshot({ path: path.join(out, "06-edit-branch.png") });
+
   for (const f of fs.readdirSync(folder)) {
     if (/\.(png|jpe?g|webp|py)$/i.test(f)) fs.copyFileSync(path.join(folder, f), path.join(out, `made-${f}`));
   }
@@ -113,10 +131,11 @@ async function runTask(win, label, prompt, timeoutMs) {
   // Relaunch: the conversation is still there.
   const store = path.join(process.env.APPDATA, "Open Uncensored", "conversations.json");
   const saved = fs.existsSync(store) ? JSON.parse(fs.readFileSync(store, "utf8")) : [];
-  check("conversation saved to disk", saved.length > 0 && saved[0].turns.length >= 4, `${saved.length} saved, ${saved[0]?.turns.length ?? 0} turns`);
+  const main = saved.find((c) => !c.branchedFrom && c.turns.length >= 4);
+  check("conversations saved to disk (original + branch)", Boolean(main) && saved.some((c) => c.branchedFrom), `${saved.length} saved`);
   ({ app, win } = await launch());
-  const sidebarHasIt = await win.getByText(saved[0]?.title ?? "__none__").first().isVisible({ timeout: 20_000 }).catch(() => false);
-  check("conversation listed again after a restart", sidebarHasIt, saved[0]?.title);
+  const sidebarHasIt = await win.getByText(main?.title ?? "__none__", { exact: true }).first().isVisible({ timeout: 20_000 }).catch(() => false);
+  check("conversation listed again after a restart", sidebarHasIt, main?.title);
   await win.screenshot({ path: path.join(out, "04-after-restart.png") });
   await app.close();
 

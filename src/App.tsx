@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronRight, File, Folder, Gear, ImageIcon, Pencil, Plus, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
-import { type AgentItem, type UpdateState, balance, type Conversation, fetchModels, md, type ModelInfo, pollPurchase, startPurchase, suggestTitle, uid } from "./lib";
+import { type AgentItem, type UpdateState, balance, branchContext, type Conversation, fetchModels, md, type ModelInfo, pollPurchase, startPurchase, suggestTitle, uid } from "./lib";
 import logo from "./logo.svg";
 import { ModelPicker } from "./ModelPicker";
 
@@ -117,6 +117,29 @@ export default function App() {
       model: topModel(models),
       folder,
       turns: [],
+      updated: Date.now(),
+    };
+    setConvos((list) => {
+      const next = [convo, ...list];
+      persist(next);
+      return next;
+    });
+    setActiveId(convo.id);
+  };
+  // A new conversation with the first `upTo` turns of `from`, in the same folder and on the same model.
+  // "Edit in a branch" also passes the user's message, which lands in the composer to change and send.
+  const branch = (from: Conversation, upTo: number, draft?: string) => {
+    const convo: Conversation = {
+      id: uid(),
+      kind: "agent",
+      title: `${from.title} (branch)`,
+      named: true,
+      model: from.model,
+      modelPicked: true,
+      folder: from.folder,
+      turns: structuredClone(from.turns.slice(0, upTo)),
+      branchedFrom: { id: from.id, title: from.title },
+      draft,
       updated: Date.now(),
     };
     setConvos((list) => {
@@ -248,6 +271,8 @@ export default function App() {
             models={models}
             update={update}
             onSpent={refreshCredit}
+            onBranch={(upTo, draft) => branch(active, upTo, draft)}
+            onOpen={(id) => convos.some((c) => c.id === id) && setActiveId(id)}
             bar={<SidebarToggle open={sidebar} onOpen={() => setSidebar(true)} />}
           />
         ) : (
@@ -440,19 +465,27 @@ function AgentView({
   models,
   update,
   onSpent,
+  onBranch,
+  onOpen,
   bar,
 }: {
   convo: Conversation;
   models: ModelInfo[];
   update: Update;
   onSpent: () => void;
+  onBranch: (upTo: number, draft?: string) => void;
+  onOpen: (id: string) => void;
   bar: React.ReactNode;
 }) {
   const [busy, setBusy] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const convoRef = useRef(convo);
   convoRef.current = convo;
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(convo.draft ?? "");
+  // A branch made with "Edit in a branch" opens with the message in the composer, once.
+  useEffect(() => {
+    if (convo.draft !== undefined) update(convo.id, (c) => ({ ...c, draft: undefined }));
+  }, [convo.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const runRef = useRef<string | null>(null);
   const scroller = useAutoScroll(convo.turns);
 
@@ -547,7 +580,9 @@ function AgentView({
       turns: [...c.turns, { role: "user", text: prompt }, { role: "assistant", text: "", items: [], model: c.model }],
       updated: Date.now(),
     }));
-    const r = await window.ou.startAgent({ runId, threadId: convo.threadId, prompt, cwd: convo.folder!, model: convo.model });
+    // The first message of a branch starts a new agent session: give it the conversation so far.
+    const agentPrompt = !convo.threadId && convo.turns.length > 0 ? branchContext(convo.turns) + prompt : prompt;
+    const r = await window.ou.startAgent({ runId, threadId: convo.threadId, prompt: agentPrompt, cwd: convo.folder!, model: convo.model });
     if (r.error) {
       upsert({ kind: "error", id: uid(), text: r.error });
       runRef.current = null;
@@ -600,13 +635,32 @@ function AgentView({
               <p className="mt-1.5 text-[13px] text-fg-3">Working in {convo.folder}</p>
             </div>
           )}
+          {convo.branchedFrom && (
+            <button
+              onClick={() => onOpen(convo.branchedFrom!.id)}
+              className="self-center rounded-full bg-white/[0.05] px-3 py-1 text-[11.5px] text-fg-3 transition-colors hover:text-fg"
+            >
+              Branched from {convo.branchedFrom.title}
+            </button>
+          )}
           {convo.turns.map((t, i) =>
             t.role === "user" ? (
-              <div key={i} className="max-w-[85%] self-end whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-white/[0.08] px-4 py-2.5 text-[14.5px] leading-relaxed">
-                {t.text}
+              <div key={i} className="group flex flex-col items-end gap-1">
+                <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-white/[0.08] px-4 py-2.5 text-[14.5px] leading-relaxed">
+                  {t.text}
+                </div>
+                {!busy && (
+                  <button
+                    onClick={() => onBranch(i, t.text)}
+                    title="Start a new conversation from just before this message, with it in the composer to change"
+                    className="text-[11.5px] text-fg-3 opacity-0 transition-opacity hover:text-fg group-hover:opacity-100"
+                  >
+                    Edit in a branch
+                  </button>
+                )}
               </div>
             ) : (
-              <div key={i} className="flex flex-col gap-2">
+              <div key={i} className="group flex flex-col gap-2">
                 <div className="flex items-center gap-2 text-[11.5px] text-fg-3">
                   <img src={logo} alt="" className="h-4 w-4 rounded" />
                   <span>{modelName(t.model)}</span>
@@ -619,6 +673,15 @@ function AgentView({
                     <Spinner />
                     <span className="truncate">{drawing ? "Generating image" : running ? `Running ${cleanCommand(running.command).slice(0, 60)}` : "Thinking"}</span>
                   </div>
+                )}
+                {!(busy && i === convo.turns.length - 1) && (
+                  <button
+                    onClick={() => onBranch(i + 1)}
+                    title="Start a new conversation that continues from this reply; this one stays as it is"
+                    className="self-start text-[11.5px] text-fg-3 opacity-0 transition-opacity hover:text-fg group-hover:opacity-100"
+                  >
+                    Branch from here
+                  </button>
                 )}
               </div>
             ),

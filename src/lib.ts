@@ -39,6 +39,8 @@ export interface Conversation {
   threadId?: string; // agent mode: Codex thread to resume
   named?: boolean; // the user renamed it: never auto-title over it
   modelPicked?: boolean; // the user chose the model: never switch it to the current #1
+  branchedFrom?: { id: string; title: string }; // made with "Branch from here" / "Edit in a branch"
+  draft?: string; // text to put in the composer when the conversation opens (an edited message)
   turns: Turn[];
   updated: number;
 }
@@ -156,3 +158,31 @@ export async function pollPurchase(sessionId: string, claim: string) {
   const r = await window.ou.request({ url: `${SITE}/api/agent/checkout/${sessionId}`, auth: false, claim });
   return r.json as { status: string; api_key?: string | null; balance_cents?: number; error?: string };
 }
+
+// What a branched conversation tells the agent the first time: the conversation so far, compact,
+// because the branch starts a new agent session that has not seen any of it. Newest turns are kept
+// when it is long.
+export function branchContext(turns: Turn[], maxChars = 40_000): string {
+  const parts = turns.map((t) => {
+    if (t.role === "user") return `User: ${t.text}`;
+    const lines: string[] = [];
+    for (const it of t.items ?? []) {
+      if (it.kind === "message") lines.push(it.text);
+      else if (it.kind === "command") lines.push(`[ran: ${it.command}${it.exitCode ? ` (exit ${it.exitCode})` : ""}]${it.output ? `\n${it.output.slice(-1500)}` : ""}`);
+      else if (it.kind === "file") lines.push(`[edited files: ${it.summary}]`);
+      else if (it.kind === "image") lines.push(`[generated image${it.files.length ? `: ${it.files.join(", ")}` : ""} with ${it.model}: ${it.prompt}]`);
+      else if (it.kind === "error") lines.push(`[error: ${it.text}]`);
+    }
+    if (t.text) lines.push(t.text);
+    return `You: ${lines.join("\n") || "(no reply)"}`;
+  });
+  let text = parts.join("\n\n");
+  if (text.length > maxChars) text = "(earlier turns omitted)\n\n" + text.slice(text.length - maxChars);
+  return (
+    "This conversation was branched from an earlier one. Here is that conversation so far, for context. You are " +
+    "in the same working folder, so files it created or changed may already exist.\n\n<conversation>\n" +
+    text +
+    "\n</conversation>\n\nThe user's new message:\n"
+  );
+}
+
