@@ -11,8 +11,14 @@ const WIN = window.ou.platform === "win32";
 const MOD = WIN ? "Ctrl+" : "⌘";
 
 // New chats start on the #1 model in the rankings; this is only used until the list has loaded.
+// New conversations start on DeepSeek V4.1 Flash 1017 whatever the hourly ranking says (it and GLM 5.3
+// Flash trade #1 by a tenth of a point, and DeepSeek costs about a third as much per agent request).
+// The current #1 only if DeepSeek ever drops out of the model list.
 const DEFAULT_MODEL = "deepseek-v4.1-flash-1017-uncensored";
-const topModel = (models: ModelInfo[]) => models.find((m) => m.rank === 1)?.id ?? DEFAULT_MODEL;
+const topModel = (models: ModelInfo[]) =>
+  !models.length || models.some((m) => m.id === DEFAULT_MODEL)
+    ? DEFAULT_MODEL
+    : (models.find((m) => m.rank === 1)?.id ?? DEFAULT_MODEL);
 const PACKS = [1000, 2500, 5000];
 const DEFAULT_TITLE = "New conversation";
 
@@ -73,11 +79,11 @@ export default function App() {
     fetchModels().then(setModels).catch(() => setModels([]));
   }, []);
 
-  // A chat made before the model list arrived starts on DEFAULT_MODEL: move it to the current #1
-  // unless the user already sent a message or picked a model.
+  // Empty chats the user did not pick a model for move to the default (topModel), e.g. ones opened on
+  // GLM while it was #1. Chats with messages or a chosen model keep theirs.
   useEffect(() => {
-    const top = models.find((m) => m.rank === 1)?.id;
-    if (!top) return;
+    if (!models.length) return;
+    const top = topModel(models);
     setConvos((list) => {
       if (!list.some((c) => c.turns.length === 0 && !c.modelPicked && c.model !== top)) return list;
       const next = list.map((c) => (c.turns.length === 0 && !c.modelPicked ? { ...c, model: top } : c));
