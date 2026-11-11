@@ -149,7 +149,7 @@ function codexHome() {
   const windowsNote = IS_WIN
     ? "\n\n# This computer\n\nThe user is on Windows. Your shell commands run in PowerShell, not bash: use PowerShell syntax " +
       "(Set-Content, Get-ChildItem, here-strings @' '@), and Windows paths. Do not use bash heredocs (<<EOF), cat > file or && chains " +
-      "that PowerShell 5 rejects; to write a file, prefer your file editing tool.\n"
+      "that PowerShell 5 rejects; to write a file, pipe a here-string to Set-Content (@'...'@ | Set-Content -Path f -Encoding utf8).\n"
     : "";
   fs.writeFileSync(prompt, fs.readFileSync(path.join(__dirname, "agent-prompt.md"), "utf8") + windowsNote);
   fs.writeFileSync(
