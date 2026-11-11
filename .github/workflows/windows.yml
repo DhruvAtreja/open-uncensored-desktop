@@ -13,12 +13,17 @@ on:
         description: "Also run the end-to-end test with a real key (images, code, restart)"
         type: boolean
         default: false
+      update_test:
+        description: "Instead of building: install the previous release and check it self-updates to the latest"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
   windows:
+    if: ${{ !inputs.update_test }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -94,3 +99,42 @@ jobs:
         run: |
           $setup = Get-ChildItem release -Filter "OpenUncensored-Setup-*-win-x64.exe" | Select-Object -First 1
           gh release upload "${{ inputs.tag }}" $setup.FullName --clobber
+
+  self-update:
+    if: ${{ inputs.update_test }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the previous release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tags = gh release list -R ${{ github.repository }} --limit 10 --json tagName --jq '.[].tagName'
+          $latest = $tags[0]; $previous = $tags[1]
+          Write-Host "latest $latest, previous $previous"
+          gh release download $previous -R ${{ github.repository }} -p "*-win-x64.exe" -D prev
+          $setup = Get-ChildItem prev -Filter "*.exe" | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList "/S" -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "OpenUncensored.exe" | Select-Object -First 1
+          "APP_DIR=$($exe.DirectoryName)" | Out-File $env:GITHUB_ENV -Append
+          "WANT=$($latest.TrimStart('v'))" | Out-File $env:GITHUB_ENV -Append
+          $data = Join-Path $env:APPDATA "Open Uncensored"
+          New-Item -ItemType Directory -Force $data | Out-Null
+          [IO.File]::WriteAllText((Join-Path $data "api-key"), "${{ secrets.OU_TEST_KEY }}")
+      - name: Self-update to the latest release
+        shell: pwsh
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: |
+          npm install --no-save playwright
+          node scripts/win-update-test.cjs "$env:APP_DIR" "$env:WANT" "$env:RUNNER_TEMP\update"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-self-update
+          path: ${{ runner.temp }}/update
+
