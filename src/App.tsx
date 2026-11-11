@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronRight, File, Folder, Gear, ImageIcon, Pencil, Plus, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
-import { type AgentItem, type UpdateState, balance, branchContext, type Conversation, fetchModels, md, type ModelInfo, pollPurchase, startPurchase, suggestTitle, uid } from "./lib";
+import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Pencil, Plus, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
+import { type AgentItem, type UpdateState, balance, branchContext, type Conversation, FEEDBACK_KINDS, fetchModels, md, type ModelInfo, pollPurchase, sendFeedback, startPurchase, suggestTitle, uid } from "./lib";
 import logo from "./logo.svg";
 import { ModelPicker } from "./ModelPicker";
 
@@ -32,6 +32,7 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [credit, setCredit] = useState<number | null>(null);
   const [settings, setSettings] = useState(false);
+  const [feedback, setFeedback] = useState(false);
   const [appUpdate, setAppUpdate] = useState<UpdateState>({ status: "idle" });
   useEffect(() => {
     window.ou.getUpdate().then(setAppUpdate);
@@ -250,6 +251,13 @@ export default function App() {
           </button>
         )}
         <button
+          onClick={() => setFeedback(true)}
+          className="mx-3 -mb-1 mt-2 flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] text-fg-2 transition-colors hover:bg-white/[0.05] hover:text-fg"
+        >
+          <Chat className="h-4 w-4 text-fg-3" />
+          <span className="flex-1">Submit feedback</span>
+        </button>
+        <button
           onClick={() => setSettings(true)}
           className="m-3 flex items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 py-2.5 text-left transition-colors hover:bg-white/[0.05]"
         >
@@ -289,6 +297,107 @@ export default function App() {
           onSignOut={() => window.ou.setKey(null).then(() => setKey(null))}
         />
       )}
+      {feedback && <Feedback model={active?.model} onClose={() => setFeedback(false)} />}
+    </div>
+  );
+}
+
+// "Submit feedback" (sidebar): a message to the team, sent with the account, app version, OS and model.
+function Feedback({ model, onClose }: { model?: string; onClose: () => void }) {
+  const [kind, setKind] = useState<string>("bug");
+  const [message, setMessage] = useState("");
+  const [contact, setContact] = useState("");
+  const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
+  const [error, setError] = useState("");
+  const submit = useCallback(async () => {
+    if (!message.trim() || state === "sending") return;
+    setState("sending");
+    setError("");
+    const r = await sendFeedback({ message: message.trim(), category: kind, contact: contact.trim(), model });
+    if (r.ok) setState("sent");
+    else {
+      setState("idle");
+      setError(r.error);
+    }
+  }, [message, kind, contact, model, state]);
+  useEffect(() => {
+    const keys = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit();
+    };
+    window.addEventListener("keydown", keys);
+    return () => window.removeEventListener("keydown", keys);
+  }, [onClose, submit]);
+  return (
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-[2px]" onClick={onClose}>
+      <div className="w-full max-w-[460px] rounded-2xl border border-white/10 bg-ink-2 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-[16px] font-semibold">Submit feedback</h2>
+          <button onClick={onClose} className="rounded-md p-1 text-fg-3 hover:bg-white/[0.07] hover:text-fg">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {state === "sent" ? (
+          <div className="mt-6 text-center">
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-white/[0.06]">
+              <Check className="h-5 w-5 text-ok" />
+            </div>
+            <p className="mt-3 text-[14px] font-medium">Thanks, we got it.</p>
+            <p className="mt-1 text-[12.5px] text-fg-3">A person on the team reads every message.</p>
+            <button onClick={onClose} className="mt-5 rounded-xl bg-fg px-4 py-2 text-[13px] font-medium text-ink hover:opacity-90">
+              Close
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {FEEDBACK_KINDS.map((k) => (
+                <button
+                  key={k.id}
+                  onClick={() => setKind(k.id)}
+                  className={`rounded-full border px-3 py-1 text-[12px] transition-colors ${
+                    kind === k.id ? "border-white/25 bg-white/[0.1] text-fg" : "border-white/[0.08] text-fg-3 hover:text-fg-2"
+                  }`}
+                >
+                  {k.label}
+                </button>
+              ))}
+            </div>
+            <textarea
+              autoFocus
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              maxLength={5000}
+              rows={6}
+              placeholder={
+                kind === "bug"
+                  ? "What happened, and what did you expect?"
+                  : kind === "model_request"
+                    ? "Which model should we add?"
+                    : "What should we add or change?"
+              }
+              className="mt-3 w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 text-[13.5px] leading-relaxed outline-none placeholder:text-fg-3 focus:border-white/20"
+            />
+            <input
+              value={contact}
+              onChange={(e) => setContact(e.target.value)}
+              placeholder="Your email, if you want a reply (optional)"
+              className="mt-2 w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[13px] outline-none placeholder:text-fg-3 focus:border-white/20"
+            />
+            {error && <p className="mt-2 text-[12px] text-bad">{error}</p>}
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => void submit()}
+                disabled={!message.trim() || state === "sending"}
+                className="flex shrink-0 items-center gap-2 rounded-xl bg-fg px-4 py-2 text-[13px] font-medium text-ink transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                {state === "sending" && <Spinner />}
+                Send
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -140,6 +140,41 @@ export async function balance(): Promise<number | null> {
   return r.status === 200 && typeof usd === "number" ? usd : null;
 }
 
+// Feedback goes to the site's feedback box (emailed to the team, stored), sent with the key so it is
+// tied to the account, and tagged with the app version, OS and the model in use.
+export const FEEDBACK_KINDS = [
+  { id: "bug", label: "Something broke" },
+  { id: "feature", label: "Idea" },
+  { id: "model_request", label: "Model request" },
+  { id: "other", label: "Other" },
+] as const;
+
+export async function sendFeedback(f: {
+  message: string;
+  category: string;
+  contact: string;
+  model?: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const u = await window.ou.getUpdate().catch(() => null);
+  const os = window.ou.platform === "win32" ? "Windows" : window.ou.platform === "darwin" ? "Mac" : window.ou.platform;
+  const r = await window.ou.request({
+    url: `${SITE}/api/feedback`,
+    method: "POST",
+    body: {
+      message: f.message,
+      category: f.category,
+      contact: f.contact,
+      model: f.model ?? "",
+      agent: `OpenUncensored desktop ${u?.current ?? ""} (${os})`.replace("  ", " "),
+      source: "desktop",
+    },
+  });
+  if (r.status === 201) return { ok: true };
+  const err = (r.json as { error?: unknown }).error;
+  const msg = typeof err === "string" ? err : (err as { message?: string } | undefined)?.message;
+  return { ok: false, error: msg || (r.status ? `Could not send (error ${r.status}).` : "No connection. Try again.") };
+}
+
 // Buying credits without the website: a payment link for the human, then poll for the key.
 export async function startPurchase(credits: number, key?: string) {
   const r = await window.ou.request({
