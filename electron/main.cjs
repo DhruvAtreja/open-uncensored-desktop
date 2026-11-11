@@ -144,7 +144,14 @@ function codexHome() {
   const home = data("codex");
   fs.mkdirSync(home, { recursive: true });
   const prompt = path.join(home, "agent-prompt.md");
-  fs.writeFileSync(prompt, fs.readFileSync(path.join(__dirname, "agent-prompt.md"), "utf8"));
+  // On Windows, Codex runs commands in PowerShell; say so up front, or models reach for bash
+  // syntax (heredocs, cat > file) first and only switch after a failed command.
+  const windowsNote = IS_WIN
+    ? "\n\n# This computer\n\nThe user is on Windows. Your shell commands run in PowerShell, not bash: use PowerShell syntax " +
+      "(Set-Content, Get-ChildItem, here-strings @' '@), and Windows paths. Do not use bash heredocs (<<EOF), cat > file or && chains " +
+      "that PowerShell 5 rejects; to write a file, prefer your file editing tool.\n"
+    : "";
+  fs.writeFileSync(prompt, fs.readFileSync(path.join(__dirname, "agent-prompt.md"), "utf8") + windowsNote);
   fs.writeFileSync(
     path.join(home, "config.toml"),
     [

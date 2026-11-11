@@ -80,7 +80,7 @@ async function runTask(win, label, prompt, timeoutMs) {
   check("image file saved in the conversation folder", images.length > 0, images.join(", "));
   const big = images.filter((f) => fs.statSync(path.join(folder, f)).size > 10_000);
   check("image file has real content (>10 KB)", big.length > 0, images.map((f) => `${f}=${fs.statSync(path.join(folder, f)).size}B`).join(", "));
-  const inline = await win.locator('main img[src^="data:image"]').count();
+  const inline = await win.locator('main img[src^="data:image/png"], main img[src^="data:image/jpeg"], main img[src^="data:image/webp"]').count();
   check("image shown inline in the chat", inline > 0, `${inline} inline images`);
   check("no image error shown", !/Image generation failed/i.test(imageText));
 
@@ -102,7 +102,8 @@ async function runTask(win, label, prompt, timeoutMs) {
     check("fib.py runs and prints 377", stdout.includes("377"), stdout.replace(/\s+/g, " ").slice(0, 120));
   }
   check("program output (377) shown in the chat", codeText.includes("377"));
-  check("commands shown without the PowerShell wrapper", !/powershell(\.exe)?"?\s+(-NoProfile\s+)?-Command/i.test(codeText));
+  check("commands shown without the PowerShell wrapper", !/(powershell|pwsh)(\.exe)?"?\s+(-\w+\s+)*-Command/i.test(codeText));
+  check("agent used PowerShell syntax first time (no bash heredoc)", !/<<\s*'?EOF/.test(codeText));
 
   for (const f of fs.readdirSync(folder)) {
     if (/\.(png|jpe?g|webp|py)$/i.test(f)) fs.copyFileSync(path.join(folder, f), path.join(out, `made-${f}`));

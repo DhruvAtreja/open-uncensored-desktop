@@ -642,7 +642,7 @@ function AgentView({
 const cleanCommand = (cmd: string) =>
   cmd
     .replace(/^\/bin\/(zsh|bash) -lc /, "")
-    .replace(/^"?[^"\s]*(powershell|pwsh)(\.exe)?"?\s+(-NoLogo\s+|-NoProfile\s+)*-Command\s+/i, "")
+    .replace(/^"?(?:[^"]*[\\/])?(?:powershell|pwsh)(?:\.exe)?"?\s+(?:-\w+\s+)*?-Command\s+/i, "")
     .replace(/^(["'])([\s\S]*)\1$/, "$2");
 
 function AgentItemView({ item }: { item: AgentItem }) {
