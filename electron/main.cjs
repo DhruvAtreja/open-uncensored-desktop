@@ -95,7 +95,7 @@ function appEvent(event, props = {}) {
   fetch("https://openuncensored.com/api/e", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Title": "OpenUncensored Desktop" },
-    body: JSON.stringify({ event, vid: installId(), ref: "desktop-app", props: { version: app.getVersion(), ...props } }),
+    body: JSON.stringify({ event, vid: installId(), ref: "desktop-app", props: { version: app.getVersion(), platform: process.platform, ...props } }),
     signal: AbortSignal.timeout(5000),
   }).catch(() => {});
 }

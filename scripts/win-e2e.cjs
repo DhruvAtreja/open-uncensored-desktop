@@ -1,0 +1,131 @@
+// End-to-end test of the installed Windows app with a real key (run by .github/workflows/windows.yml
+// when started with e2e=true). Drives the UI like a user: new conversation, ask the agent for an
+// image, then for a Python program it must write and run; checks the files on disk, the inline image,
+// the output in the chat, that the conversation is saved, and that the page logged no errors.
+const { _electron } = require("playwright");
+const { execFileSync } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const exe = path.join(process.argv[2], "OpenUncensored.exe");
+const out = process.argv[3];
+fs.mkdirSync(out, { recursive: true });
+const log = (...a) => {
+  const line = a.join(" ");
+  console.log(line);
+  fs.appendFileSync(path.join(out, "e2e.log"), line + "\n");
+};
+const results = [];
+const check = (name, ok, detail = "") => {
+  results.push({ name, ok: Boolean(ok), detail });
+  log(ok ? "PASS" : "FAIL", name, detail ? `(${detail})` : "");
+};
+const pageErrors = [];
+
+async function launch() {
+  const app = await _electron.launch({ executablePath: exe, timeout: 90_000 });
+  app.process().stdout?.on("data", (d) => fs.appendFileSync(path.join(out, "main.log"), d));
+  app.process().stderr?.on("data", (d) => fs.appendFileSync(path.join(out, "main.log"), d));
+  const win = await app.firstWindow();
+  win.on("console", (m) => fs.appendFileSync(path.join(out, "renderer.log"), `[${m.type()}] ${m.text()}\n`));
+  win.on("pageerror", (e) => pageErrors.push(String(e)));
+  await win.waitForLoadState("domcontentloaded");
+  return { app, win };
+}
+
+async function runTask(win, label, prompt, timeoutMs) {
+  const ta = win.locator('textarea[placeholder="Ask anything, or describe a task"]');
+  await ta.fill(prompt);
+  await ta.press("Enter");
+  const stop = win.locator('button[title="Stop"]');
+  await stop.waitFor({ state: "visible", timeout: 30_000 }).catch(() => log(label, "stop button never appeared"));
+  const t0 = Date.now();
+  let lastShot = 0;
+  while (await stop.isVisible()) {
+    if (Date.now() - t0 > timeoutMs) {
+      log(label, "TIMEOUT, stopping the run");
+      await stop.click().catch(() => {});
+      break;
+    }
+    if (Date.now() - lastShot > 30_000) {
+      lastShot = Date.now();
+      await win.screenshot({ path: path.join(out, `${label}-progress-${Math.round((Date.now() - t0) / 1000)}s.png`) });
+    }
+    await win.waitForTimeout(1000);
+  }
+  log(label, `finished in ${Math.round((Date.now() - t0) / 1000)} s`);
+  await win.waitForTimeout(1500);
+  await win.screenshot({ path: path.join(out, `${label}.png`) });
+  const text = await win.locator("main").innerText();
+  fs.writeFileSync(path.join(out, `${label}.txt`), text);
+  return text;
+}
+
+(async () => {
+  let { app, win } = await launch();
+  await win.getByText("New conversation").first().click({ timeout: 60_000 });
+  const working = await win.getByText(/^Working in /).first().textContent({ timeout: 30_000 });
+  const folder = working.replace(/^Working in /, "").trim();
+  log("folder:", folder);
+  check("conversation folder exists", fs.existsSync(folder), folder);
+  await win.screenshot({ path: path.join(out, "01-new-conversation.png") });
+
+  const imageText = await runTask(
+    win,
+    "02-image",
+    "Generate one picture with your image tool: a red fox standing in fresh snow, photo style. Name the file fox. Then reply with just the saved file name.",
+    300_000,
+  );
+  const images = fs.readdirSync(folder).filter((f) => /\.(png|jpe?g|webp)$/i.test(f));
+  check("image file saved in the conversation folder", images.length > 0, images.join(", "));
+  const big = images.filter((f) => fs.statSync(path.join(folder, f)).size > 10_000);
+  check("image file has real content (>10 KB)", big.length > 0, images.map((f) => `${f}=${fs.statSync(path.join(folder, f)).size}B`).join(", "));
+  const inline = await win.locator('main img[src^="data:image"]').count();
+  check("image shown inline in the chat", inline > 0, `${inline} inline images`);
+  check("no image error shown", !/Image generation failed/i.test(imageText));
+
+  const codeText = await runTask(
+    win,
+    "03-code",
+    "Write a Python script fib.py in this folder that prints the first 15 Fibonacci numbers starting 0 1, one per line. Then run it with python and show me its output.",
+    300_000,
+  );
+  const fib = path.join(folder, "fib.py");
+  check("fib.py written to disk", fs.existsSync(fib));
+  if (fs.existsSync(fib)) {
+    let stdout = "";
+    try {
+      stdout = execFileSync("python", [fib], { timeout: 20_000 }).toString();
+    } catch (e) {
+      stdout = String(e);
+    }
+    check("fib.py runs and prints 377", stdout.includes("377"), stdout.replace(/\s+/g, " ").slice(0, 120));
+  }
+  check("program output (377) shown in the chat", codeText.includes("377"));
+  check("commands shown without the PowerShell wrapper", !/powershell(\.exe)?"?\s+(-NoProfile\s+)?-Command/i.test(codeText));
+
+  for (const f of fs.readdirSync(folder)) {
+    if (/\.(png|jpe?g|webp|py)$/i.test(f)) fs.copyFileSync(path.join(folder, f), path.join(out, `made-${f}`));
+  }
+  await app.close();
+
+  // Relaunch: the conversation is still there.
+  const store = path.join(process.env.APPDATA, "Open Uncensored", "conversations.json");
+  const saved = fs.existsSync(store) ? JSON.parse(fs.readFileSync(store, "utf8")) : [];
+  check("conversation saved to disk", saved.length > 0 && saved[0].turns.length >= 4, `${saved.length} saved, ${saved[0]?.turns.length ?? 0} turns`);
+  ({ app, win } = await launch());
+  const sidebarHasIt = await win.getByText(saved[0]?.title ?? "__none__").first().isVisible({ timeout: 20_000 }).catch(() => false);
+  check("conversation listed again after a restart", sidebarHasIt, saved[0]?.title);
+  await win.screenshot({ path: path.join(out, "04-after-restart.png") });
+  await app.close();
+
+  check("no JavaScript errors in the page", pageErrors.length === 0, pageErrors.join(" | ").slice(0, 400));
+  fs.writeFileSync(path.join(out, "results.json"), JSON.stringify(results, null, 2));
+  const failed = results.filter((r) => !r.ok);
+  log(`${results.length - failed.length}/${results.length} checks passed`);
+  process.exit(failed.length ? 1 : 0);
+})().catch((e) => {
+  log("FATAL", e.stack || String(e));
+  fs.writeFileSync(path.join(out, "results.json"), JSON.stringify(results, null, 2));
+  process.exit(2);
+});

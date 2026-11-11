@@ -9,6 +9,10 @@ on:
       tag:
         description: "Release tag to attach the installer to (e.g. v0.1.11); empty = build and test only"
         required: false
+      e2e:
+        description: "Also run the end-to-end test with a real key (images, code, restart)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -55,6 +59,25 @@ jobs:
           $bmp.Save("$env:RUNNER_TEMP\app.png")
           Write-Host "app running (pid $($p.Id)) after 20 s"
           Stop-Process -Id $p.Id -Force
+      - name: End-to-end with a real key
+        if: ${{ inputs.e2e }}
+        shell: pwsh
+        env:
+          OU_TEST_KEY: ${{ secrets.OU_TEST_KEY }}
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: |
+          $data = Join-Path $env:APPDATA "Open Uncensored"
+          New-Item -ItemType Directory -Force $data | Out-Null
+          [IO.File]::WriteAllText((Join-Path $data "api-key"), $env:OU_TEST_KEY)
+          npm install --no-save playwright
+          python --version
+          node scripts/win-e2e.cjs "$env:APP_DIR" "$env:RUNNER_TEMP\e2e"
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && inputs.e2e }}
+        with:
+          name: windows-e2e
+          path: ${{ runner.temp }}/e2e
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: always()
         with:
