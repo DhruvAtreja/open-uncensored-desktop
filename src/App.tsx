@@ -10,6 +10,7 @@ import {
   type Conversation,
   FEEDBACK_KINDS,
   fetchModels,
+  isEphemeralPath,
   isShownImage,
   md,
   type ModelInfo,
@@ -560,7 +561,11 @@ function Composer({
     const paths: string[] = [];
     const failed: string[] = [];
     for (const f of files) {
-      const where = window.ou.pathForFile(f);
+      // A file in a system temp folder (a screenshot dragged from the macOS thumbnail lives in
+      // TemporaryItems/NSIRD_screencaptureui_...) is readable by the app thanks to the drag, but not by
+      // the agent, and macOS deletes it soon after. Such files are copied in, like files with no path.
+      const found = window.ou.pathForFile(f);
+      const where = found && !isEphemeralPath(found) ? found : "";
       const image = f.type.startsWith("image/");
       if (where && (!image || isShownImage(where))) {
         paths.push(where);
@@ -568,7 +573,9 @@ function Composer({
       }
       const bytes = await f.arrayBuffer().catch(() => null);
       const saved = bytes
-        ? (image ? await window.ou.pasteImage(bytes, f.type) : null) ?? (where || (await window.ou.saveFile(bytes, f.name || "file")))
+        ? found && !where
+          ? await window.ou.saveFile(bytes, f.name || baseName(found)) // a temp file: same name, same format
+          : (image ? await window.ou.pasteImage(bytes, f.type) : null) ?? (where || (await window.ou.saveFile(bytes, f.name || "file")))
         : where || null;
       if (saved) paths.push(saved);
       else failed.push(f.name || "a file");

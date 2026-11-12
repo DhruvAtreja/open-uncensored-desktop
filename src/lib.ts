@@ -138,6 +138,12 @@ export function splitAttachments(text: string): { text: string; attachments: Att
   return { text: text.replace(ATTACHED, "").trim(), attachments };
 }
 export const baseName = (file: string) => file.split(/[\\/]/).pop() ?? file;
+// System temp folders other apps hand files out of (macOS screenshot thumbnails, files dragged out of
+// Mail or an archive): the agent may not be allowed to read them and they vanish soon, so they are copied.
+export const isEphemeralPath = (file: string) =>
+  /[\\/](TemporaryItems|NSIRD_[^\\/]*|com\.apple\.[^\\/]*|Temp[\\/]+\{?[0-9A-F-]{8,}\}?)[\\/]/i.test(file) ||
+  (/^\/(private\/)?var\/folders\/|[\\/]AppData[\\/]Local[\\/]Temp[\\/]/i.test(file) && !/[\\/]OpenUncensored[\\/]/.test(file));
+
 export const isShownImage = (file: string) => /\.(png|jpe?g|webp)$/i.test(file); // what image:read shows
 
 // Model output is untrusted: raw HTML in it is shown as text, never rendered.
