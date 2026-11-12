@@ -33,6 +33,8 @@ export function agentError(raw: string): string {
   if (/\b402\b|insufficient|out of credit/i.test(text)) return "You are out of credit. Add credit to keep going.";
   const lines = text
     .split("\n")
+    // Noise in the agent's log: its stdin note, and tool calls it was refused and already told about.
+    .filter((l) => !/Reading additional input from stdin|tools::router|failed to record rollout items/i.test(l))
     .map((l) => l.replace(/^\s*\d{4}-\d\d-\d\dT[\d:.]+Z\s+(ERROR|WARN|INFO|DEBUG|TRACE)\s+[\w:]+:\s*/, "")) // log prefixes
     .map((l) => l.replace(/\bcodex[\w-]*(::[\w]+)*/gi, "agent").replace(/\s*\(code -?\d+\)$/, ""))
     .filter((l) => l.trim());

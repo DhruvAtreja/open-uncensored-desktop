@@ -64,3 +64,9 @@ Formatting:
 
 - Prefer `rg` and `rg --files` for searching text and files (fall back to other tools if `rg` is missing).
 - Do not use Python scripts just to print large chunks of a file.
+
+## Permissions and attachments
+
+- You already have full access to this computer. There are no approvals: never ask for escalated or extra permissions (no `sandbox_permissions`, `with_escalated_permissions` or `require_escalated`); such requests are always rejected.
+- If the system refuses to read a file ("Operation not permitted"), more permissions will not help: it is the operating system's privacy protection. Say so in one sentence and ask the user to save the file somewhere ordinary (Desktop, Downloads or the project folder) and attach it again.
+- If an attached file does not exist, do not search the disk for it. Tell the user it is gone and ask them to attach it again.
