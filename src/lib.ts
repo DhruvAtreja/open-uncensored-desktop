@@ -22,6 +22,43 @@ export type AgentItem =
   | { kind: "image"; id: string; prompt: string; model: string; files: string[]; error: string; running: boolean }
   | { kind: "error"; id: string; text: string };
 
+// Agent errors in plain words. The agent is built on the open source Codex CLI, but users never need to
+// know that: its log prefixes and internal names are removed, and the errors we know get a sentence.
+export function agentError(raw: string): string {
+  const text = String(raw ?? "");
+  if (/already has an active writer|thread-store conflict/i.test(text)) {
+    return "The previous task in this conversation was still stopping. Send your message again.";
+  }
+  if (/\b(401|unauthori[sz]ed|invalid api key)\b/i.test(text)) return "Your API key was not accepted. Check it in Settings.";
+  if (/\b402\b|insufficient|out of credit/i.test(text)) return "You are out of credit. Add credit to keep going.";
+  const lines = text
+    .split("\n")
+    .map((l) => l.replace(/^\s*\d{4}-\d\d-\d\dT[\d:.]+Z\s+(ERROR|WARN|INFO|DEBUG|TRACE)\s+[\w:]+:\s*/, "")) // log prefixes
+    .map((l) => l.replace(/\bcodex[\w-]*(::[\w]+)*/gi, "agent").replace(/\s*\(code -?\d+\)$/, ""))
+    .filter((l) => l.trim());
+  return [...new Set(lines)].slice(-4).join("\n") || "The agent stopped.";
+}
+
+// Saved conversations can hold steps marked as running from a run that ended without saying so (the app
+// was closed or crashed, or the run was stopped). On load and on Stop they are marked as finished.
+export function settleRunning(turns: Turn[]): Turn[] {
+  if (!turns.some((t) => t.items?.some((i) => (i.kind === "command" || i.kind === "image") && i.running))) return turns;
+  return turns.map((t) =>
+    t.items?.some((i) => (i.kind === "command" || i.kind === "image") && i.running)
+      ? {
+          ...t,
+          items: t.items.map((i) =>
+            i.kind === "command" && i.running
+              ? { ...i, running: false }
+              : i.kind === "image" && i.running
+                ? { ...i, running: false, error: i.files.length ? i.error : "Stopped." }
+                : i,
+          ),
+        }
+      : t,
+  );
+}
+
 export interface Turn {
   role: "user" | "assistant";
   text: string; // chat text, or the user's prompt in agent mode
@@ -67,6 +104,7 @@ declare global {
       readImage(file: string): Promise<string | null>;
       openImage(file: string): Promise<void>;
       pasteImage(bytes: ArrayBuffer, type: string): Promise<string | null>;
+      saveFile(bytes: ArrayBuffer, name: string): Promise<string | null>;
       pathForFile(file: File): string;
       showFile(file: string): Promise<void>;
       request(opts: { url: string; method?: string; body?: unknown; auth?: boolean; claim?: string }): Promise<{ status: number; json: unknown }>;

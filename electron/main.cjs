@@ -110,16 +110,72 @@ function appEvent(event, props = {}) {
 
 // ---------------------------------------------------------------------------- conversations
 
-function readConversations() {
+// Every chat lives in conversations.json. Up to 0.1.25 it was rewritten in place on every agent event,
+// so a blue screen or power cut during a write left a cut-off file, which loaded as "no chats" and was
+// then saved over: every chat gone. Now:
+//  - writes go to a temp file that is flushed to disk, then renamed over the real one, so a crash
+//    leaves either the old file or the new one, never half of one;
+//  - the previous file is kept as conversations.json.bak and loaded when the main one is unreadable;
+//  - an unreadable file is never overwritten: it is moved aside as conversations.unreadable-<time>.json;
+//  - writes happen at most once a second (the last state always lands), and at once when the app quits.
+const CONVOS = "conversations.json";
+const CONVOS_BAK = "conversations.json.bak";
+const CONVOS_TMP = "conversations.json.tmp";
+const SAVE_EVERY_MS = 1000;
+
+function parseConversations(file) {
   try {
-    return JSON.parse(fs.readFileSync(data("conversations.json"), "utf8"));
+    const list = JSON.parse(fs.readFileSync(data(file), "utf8"));
+    return Array.isArray(list) ? list : null;
   } catch {
-    return [];
+    return null;
+  }
+}
+
+function readConversations() {
+  flushConversations(); // a save still waiting must not be lost when the page reloads
+  const main = parseConversations(CONVOS);
+  if (main) return main;
+  if (fs.existsSync(data(CONVOS))) {
+    // Cut off or damaged: keep it for recovery instead of ever writing over it.
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    try {
+      fs.renameSync(data(CONVOS), data(`conversations.unreadable-${stamp}.json`));
+    } catch {
+      /* left in place; the next save replaces it with a full file through the temp file */
+    }
+  }
+  return parseConversations(CONVOS_BAK) ?? [];
+}
+
+let pendingConversations = null;
+let saveTimer = null;
+
+function flushConversations() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = null;
+  if (!pendingConversations) return;
+  const list = pendingConversations;
+  pendingConversations = null;
+  try {
+    const fd = fs.openSync(data(CONVOS_TMP), "w");
+    try {
+      fs.writeSync(fd, JSON.stringify(list));
+      fs.fsyncSync(fd); // on disk before it replaces anything
+    } finally {
+      fs.closeSync(fd);
+    }
+    if (parseConversations(CONVOS)) fs.renameSync(data(CONVOS), data(CONVOS_BAK));
+    fs.renameSync(data(CONVOS_TMP), data(CONVOS));
+  } catch (e) {
+    console.error("could not save conversations", e);
   }
 }
 
 function writeConversations(list) {
-  fs.writeFileSync(data("conversations.json"), JSON.stringify(list));
+  if (!Array.isArray(list)) return;
+  pendingConversations = list;
+  if (!saveTimer) saveTimer = setTimeout(flushConversations, SAVE_EVERY_MS);
 }
 
 // ---------------------------------------------------------------------------- agent (Codex)
@@ -211,7 +267,35 @@ function codexHome() {
   return home;
 }
 
-const runs = new Map(); // runId -> child process
+// runId -> { child, threadId, exited: Promise that settles when the process is gone }
+const runs = new Map();
+
+// Stops an agent run and everything it started. On Windows a child process only dies by itself, so
+// the commands and the image tool the agent launched lived on, and since they inherit its output pipe,
+// the run never looked finished: the conversation spun forever, and the next message failed with
+// "thread ... already has an active writer" because the old run still held the conversation.
+function killRun(run) {
+  if (!run || run.child.exitCode !== null || run.child.signalCode !== null) return;
+  if (IS_WIN) {
+    try {
+      spawn("taskkill", ["/pid", String(run.child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }).on("error", () => run.child.kill());
+    } catch {
+      run.child.kill();
+    }
+  } else {
+    run.child.kill("SIGINT"); // lets the agent save the conversation
+    setTimeout(() => run.child.exitCode === null && run.child.signalCode === null && run.child.kill("SIGKILL"), 3000);
+  }
+}
+
+const within = (promise, ms) => Promise.race([promise, new Promise((r) => setTimeout(r, ms))]);
+
+// Before a conversation runs again, any earlier run of it must be gone: two runs cannot share one.
+async function endRunsOf(threadId) {
+  const old = [...runs.values()].filter((r) => r.threadId === threadId);
+  old.forEach(killRun);
+  await within(Promise.all(old.map((r) => r.exited)), 8000);
+}
 
 // Each model's context window, from the public model list. Codex has no metadata for our models,
 // so without this it guesses a window and compacts the conversation too late (or never).
@@ -242,27 +326,55 @@ async function startAgent(win, { runId, threadId, prompt, cwd, model }) {
   }
   if (threadId) args.push("resume", threadId, prompt);
   else args.push(prompt);
-  const child = spawn(bin, args, {
-    cwd,
-    env: { ...process.env, OU_API_KEY: key, OU_IMAGE_DIR: cwd, CODEX_HOME: codexHome(), PATH: `${toolsDir}${path.delimiter}${process.env.PATH}` },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  runs.set(runId, child);
-  if (!threadId) appEvent("app_agent_run", { model });
+  if (threadId) await endRunsOf(threadId);
   const send = (event) => !win.isDestroyed() && win.webContents.send("agent:event", { runId, event });
-  readline.createInterface({ input: child.stdout }).on("line", (line) => {
-    try {
-      send(JSON.parse(line));
-    } catch {
-      /* not an event line */
-    }
-  });
-  let stderr = "";
-  child.stderr.on("data", (d) => (stderr = (stderr + d).slice(-4000)));
-  child.on("close", (code) => {
-    runs.delete(runId);
-    send({ type: "run.exited", code, stderr: code ? stderr : "" });
-  });
+  if (!threadId) appEvent("app_agent_run", { model });
+
+  // One retry when the conversation is still held: the previous run's process can take a moment to go.
+  const launch = (retried) => {
+    const child = spawn(bin, args, {
+      cwd,
+      env: { ...process.env, OU_API_KEY: key, OU_IMAGE_DIR: cwd, CODEX_HOME: codexHome(), PATH: `${toolsDir}${path.delimiter}${process.env.PATH}` },
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    let markExited;
+    const run = { child, threadId, exited: new Promise((r) => (markExited = r)) };
+    runs.set(runId, run);
+    readline.createInterface({ input: child.stdout }).on("line", (line) => {
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return; // not an event line
+      }
+      if (event?.type === "thread.started" && event.thread_id) run.threadId = event.thread_id; // a first run learns its id here
+      send(event);
+    });
+    let stderr = "";
+    child.stderr.on("data", (d) => (stderr = (stderr + d).slice(-4000)));
+    let finished = false;
+    const finish = (code) => {
+      if (finished) return;
+      finished = true;
+      if (runs.get(runId) === run) runs.delete(runId);
+      markExited();
+      if (code && !retried && threadId && /already has an active writer/.test(stderr)) {
+        setTimeout(() => endRunsOf(threadId).then(() => launch(true)), 1500);
+        return;
+      }
+      send({ type: "run.exited", code, stderr: code ? stderr : "" });
+    };
+    // The run ends when the process exits, not when its output pipe closes: processes it started can
+    // keep the pipe open. The short wait lets the last output lines arrive first.
+    child.on("exit", (code) => setTimeout(() => finish(code), 300));
+    child.on("close", (code) => finish(code));
+    child.on("error", (e) => {
+      stderr += String(e.message || e);
+      finish(1);
+    });
+  };
+  launch(false);
   return { ok: true };
 }
 
@@ -514,6 +626,22 @@ function registerIpc() {
       return null;
     }
   });
+  // A dropped or pasted file with no file behind it (dragged out of a browser, an email or a zip): saved
+  // under its own name in a temp folder so the agent can open it, like any other attachment.
+  ipcMain.handle("file:save", (_e, { bytes, name }) => {
+    try {
+      const buf = Buffer.from(bytes);
+      if (!buf.length || buf.length > 100 * 1024 * 1024) return null;
+      const safe = path.basename(String(name || "file")).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 120) || "file";
+      const dir = path.join(os.tmpdir(), "OpenUncensored", "dropped", crypto.randomBytes(4).toString("hex"));
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, safe);
+      fs.writeFileSync(file, buf);
+      return file;
+    } catch {
+      return null;
+    }
+  });
   ipcMain.handle("net:request", (_e, opts) => request(opts));
   ipcMain.handle("chat:start", (_e, opts) => {
     chatStream(senderWindow(_e), opts);
@@ -526,13 +654,13 @@ function registerIpc() {
   ipcMain.handle("update:get", () => ({ ...updater.getState(), current: app.getVersion() }));
   ipcMain.handle("update:check", () => updater.checkNow());
   ipcMain.handle("update:install", () => {
-    for (const child of runs.values()) child.kill("SIGINT"); // agent tasks stop; they resume from the conversation
+    for (const run of runs.values()) killRun(run); // agent tasks stop; they resume from the conversation
     return updater.install();
   });
   updater.onChange((s) => mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.send("update:state", { ...s, current: app.getVersion() }));
   ipcMain.handle("agent:start", (_e, opts) => startAgent(senderWindow(_e), opts));
   ipcMain.handle("agent:stop", (_e, runId) => {
-    runs.get(runId)?.kill("SIGINT");
+    killRun(runs.get(runId));
     return true;
   });
 }
@@ -580,7 +708,7 @@ app.whenReady().then(() => {
 // (Mac; the conversation keeps what was done, and sending again carries on) and when the app quits.
 // On Windows the window only hides, so they keep running in the tray.
 function stopWork() {
-  for (const child of runs.values()) child.kill("SIGINT");
+  for (const run of runs.values()) killRun(run);
   for (const ctrl of streams.values()) ctrl.abort();
 }
 // Mac: closing the window leaves the app running in the Dock, like other Mac apps; clicking the
@@ -596,4 +724,5 @@ app.on("activate", () => {
 app.on("before-quit", () => {
   quitting = true;
   stopWork();
+  flushConversations();
 });

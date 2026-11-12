@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Pencil, Plus, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
 import {
+  agentError,
   type AgentItem,
   type Attachment,
   baseName,
@@ -14,6 +15,7 @@ import {
   type ModelInfo,
   pollPurchase,
   sendFeedback,
+  settleRunning,
   splitAttachments,
   startPurchase,
   suggestTitle,
@@ -102,7 +104,9 @@ export default function App() {
   useEffect(() => {
     window.ou.getKey().then(setKey);
     // Empty, never-named conversations left from earlier sessions are dropped on launch.
-    window.ou.getConversations().then((list) => setConvos(list.filter((c) => c.kind === "agent" && (c.turns.length > 0 || c.named))));
+    window.ou.getConversations().then((list) =>
+      setConvos(list.filter((c) => c.kind === "agent" && (c.turns.length > 0 || c.named)).map((c) => ({ ...c, turns: settleRunning(c.turns) }))),
+    );
     fetchModels().then(setModels).catch(() => setModels([]));
   }, []);
 
@@ -549,18 +553,28 @@ function Composer({
   // Dropped or pasted files are attached from where they are on disk. An image with no file behind it (a
   // screenshot, an image dragged out of a web page), or in a format the app cannot show, is saved to the
   // temp folder as PNG, JPEG or WebP first.
+  // Any other file without a path (dragged out of a browser, an email or a zip) is saved there under its
+  // own name; an image the app cannot convert is attached as a plain file. Nothing is dropped silently.
+  const [dropNote, setDropNote] = useState<string | null>(null);
   const addFiles = async (files: File[]) => {
     const paths: string[] = [];
+    const failed: string[] = [];
     for (const f of files) {
       const where = window.ou.pathForFile(f);
       const image = f.type.startsWith("image/");
-      if (where && (!image || isShownImage(where))) paths.push(where);
-      else if (image) {
-        const saved = await window.ou.pasteImage(await f.arrayBuffer(), f.type);
-        if (saved) paths.push(saved);
+      if (where && (!image || isShownImage(where))) {
+        paths.push(where);
+        continue;
       }
+      const bytes = await f.arrayBuffer().catch(() => null);
+      const saved = bytes
+        ? (image ? await window.ou.pasteImage(bytes, f.type) : null) ?? (where || (await window.ou.saveFile(bytes, f.name || "file")))
+        : where || null;
+      if (saved) paths.push(saved);
+      else failed.push(f.name || "a file");
     }
     if (paths.length) await addPaths(paths);
+    setDropNote(failed.length ? `Could not attach ${failed.join(", ")} (over 100 MB or unreadable).` : null);
   };
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const blobs = [...e.clipboardData.items]
@@ -591,14 +605,23 @@ function Composer({
     };
     const drop = (e: DragEvent) => {
       if (!hasFiles(e)) return;
+      e.preventDefault();
       depth = 0;
       setDragging(false);
       void addFiles([...(e.dataTransfer?.files ?? [])]);
     };
+    // Without this the page may refuse the drop for some sources and the drop event never fires.
+    const over = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    };
     window.addEventListener("dragenter", enter);
+    window.addEventListener("dragover", over);
     window.addEventListener("dragleave", leave);
     window.addEventListener("drop", drop);
     return () => {
+      window.removeEventListener("dragover", over);
       window.removeEventListener("dragenter", enter);
       window.removeEventListener("dragleave", leave);
       window.removeEventListener("drop", drop);
@@ -623,6 +646,7 @@ function Composer({
           className={`rounded-[16px] border transition-colors ${dragging ? "border-white/40 bg-[#383838]" : "border-[#404040] bg-[#303030] focus-within:border-[#4a4a4a]"}`}
         >
         {dragging && <div className="px-4 pt-3 text-[13px] text-fg-2">Drop images or files to attach them</div>}
+        {dropNote && !dragging && <div className="px-4 pt-3 text-[12.5px] text-bad">{dropNote}</div>}
         {attached.length > 0 && (
           <div className="flex flex-wrap items-center gap-2.5 px-3 pb-1 pt-3">
             {attached.map((a) => (
@@ -735,6 +759,7 @@ function AgentView({
     if (convo.draft !== undefined) update(convo.id, (c) => ({ ...c, draft: undefined }));
   }, [convo.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const runRef = useRef<string | null>(null);
+  const stoppedRef = useRef<string | null>(null); // the run the user pressed Stop on
   const scroller = useAutoScroll(convo.turns);
 
   const upsert = useCallback(
@@ -797,14 +822,16 @@ function AgentView({
               break;
             }
             case "error":
-              if (!String(item.message).startsWith("Model metadata")) upsert({ kind: "error", id, text: String(item.message ?? "") });
+              if (!String(item.message).startsWith("Model metadata")) upsert({ kind: "error", id, text: agentError(String(item.message ?? "")) });
               break;
           }
         } else if (type === "turn.failed" || type === "error") {
           const message = String((event.error as { message?: string })?.message ?? event.message ?? "The agent stopped.");
-          upsert({ kind: "error", id: uid(), text: message });
+          upsert({ kind: "error", id: uid(), text: agentError(message) });
         } else if (type === "run.exited") {
-          if (event.code && event.stderr) upsert({ kind: "error", id: uid(), text: String(event.stderr).split("\n").slice(-6).join("\n") });
+          // A run the user stopped exits with an error by design: nothing to report.
+          if (event.code && event.stderr && stoppedRef.current !== runId) upsert({ kind: "error", id: uid(), text: agentError(String(event.stderr)) });
+          update(convo.id, (c) => ({ ...c, turns: settleRunning(c.turns) }));
           runRef.current = null;
           setBusy(false);
           onSpent();
@@ -833,10 +860,26 @@ function AgentView({
     const agentPrompt = !convo.threadId && convo.turns.length > 0 ? branchContext(convo.turns) + prompt : prompt;
     const r = await window.ou.startAgent({ runId, threadId: convo.threadId, prompt: agentPrompt, cwd: convo.folder!, model: convo.model });
     if (r.error) {
-      upsert({ kind: "error", id: uid(), text: r.error });
+      upsert({ kind: "error", id: uid(), text: agentError(r.error) });
       runRef.current = null;
       setBusy(false);
     }
+  };
+
+  // Stop ends the run and everything it started. If the run has not reported back within 3 seconds, the
+  // conversation is freed anyway, so it can never stay stuck on "working".
+  const stop = () => {
+    const runId = runRef.current;
+    if (!runId) return setBusy(false);
+    stoppedRef.current = runId;
+    void window.ou.stopAgent(runId);
+    update(convo.id, (c) => ({ ...c, turns: settleRunning(c.turns) }));
+    setTimeout(() => {
+      if (runRef.current !== runId) return;
+      runRef.current = null;
+      setBusy(false);
+      onSpent();
+    }, 3000);
   };
 
   const modelName = (id?: string) => models.find((m) => m.id === id)?.name ?? id ?? "";
@@ -941,7 +984,7 @@ function AgentView({
         draft={draft}
         setDraft={setDraft}
         onSend={send}
-        onStop={() => runRef.current && window.ou.stopAgent(runRef.current)}
+        onStop={stop}
         picker={<ModelPicker value={convo.model} models={models} onChange={(m) => update(convo.id, (c) => ({ ...c, model: m, modelPicked: true }))} />}
       />
     </>
@@ -1023,7 +1066,7 @@ function AgentItemView({ item }: { item: AgentItem }) {
         </div>
       );
     case "error":
-      return <div className="whitespace-pre-wrap break-words rounded-lg border border-bad/30 bg-bad/[0.06] px-3 py-2 text-[12.5px] text-bad">{item.text}</div>;
+      return <div className="whitespace-pre-wrap break-words rounded-lg border border-bad/30 bg-bad/[0.06] px-3 py-2 text-[12.5px] text-bad">{agentError(item.text)}</div>;
   }
 }
 
