@@ -415,6 +415,8 @@ function createWindow() {
     }
   });
   ipcMain.handle("image:open", (_e, file) => isImage(file) && fs.existsSync(file) && shell.openPath(file));
+  // An attached file's chip: shows the file in Finder / Explorer (never opens or runs it).
+  ipcMain.handle("file:show", (_e, file) => typeof file === "string" && path.isAbsolute(file) && fs.existsSync(file) && shell.showItemInFolder(file));
   // An image pasted into the message box: saved to a temp folder, and its path goes in the message
   // (<image_attached>path</image_attached>) for the agent to open. PNG, JPEG and WebP are kept as
   // they are; anything else the clipboard holds (TIFF, BMP, GIF) is converted to PNG.

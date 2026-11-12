@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("ou", {
   readImage: (file) => ipcRenderer.invoke("image:read", file),
   openImage: (file) => ipcRenderer.invoke("image:open", file),
   pasteImage: (bytes, type) => ipcRenderer.invoke("image:paste", { bytes, type }),
+  showFile: (file) => ipcRenderer.invoke("file:show", file),
   // Where a dropped or pasted file lives on disk ("" for one with no file behind it, such as an
   // image dragged out of a web page).
   pathForFile: (file) => {

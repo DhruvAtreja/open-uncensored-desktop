@@ -1,6 +1,33 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Pencil, Plus, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
-import { type AgentItem, type UpdateState, balance, branchContext, type Conversation, FEEDBACK_KINDS, fetchModels, md, type ModelInfo, pollPurchase, sendFeedback, splitImages, startPurchase, suggestTitle, uid, withImages } from "./lib";
+import {
+  type AgentItem,
+  type Attachment,
+  baseName,
+  balance,
+  branchContext,
+  type Conversation,
+  FEEDBACK_KINDS,
+  fetchModels,
+  isShownImage,
+  md,
+  type ModelInfo,
+  pollPurchase,
+  sendFeedback,
+  splitAttachments,
+  startPurchase,
+  suggestTitle,
+  uid,
+  type UpdateState,
+  withAttachments,
+} from "./lib";
+
+// A new conversation's title before the model names it: what the user typed, else what they attached.
+const titleOf = (prompt: string) => {
+  const m = splitAttachments(prompt);
+  const t = m.text || (m.attachments[0]?.image ? "Image" : baseName(m.attachments[0]?.file ?? ""));
+  return t.replace(/\s+/g, " ").slice(0, 60);
+};
 import logo from "./logo.svg";
 import { ModelPicker } from "./ModelPicker";
 
@@ -498,45 +525,42 @@ function Composer({
     t.style.height = `${Math.min(t.scrollHeight, 220)}px`;
   }, [draft]);
   useEffect(() => box.current?.focus(), []);
-  // Pasted images: saved to a temp folder, shown here, and sent as <image_attached> paths after the text.
-  const [images, setImages] = useState<{ file: string; src: string }[]>([]);
-  const addImages = async (files: string[]) => {
-    const loaded = await Promise.all(files.map(async (file) => ({ file, src: (await window.ou.readImage(file)) ?? "" })));
-    setImages((prev) => [...prev, ...loaded.filter((i) => i.src && !prev.some((p) => p.file === i.file))]);
+  // Attachments (pasted, dropped or added with +): images show as thumbnails, other files as chips. They
+  // are sent after the text as <image_attached> / <file_attached> paths, never typed into the message.
+  const [attached, setAttached] = useState<(Attachment & { src: string })[]>([]);
+  const addPaths = async (paths: string[]) => {
+    const loaded = await Promise.all(
+      paths.map(async (file) => {
+        const src = isShownImage(file) ? ((await window.ou.readImage(file)) ?? "") : "";
+        return { file, image: Boolean(src), src };
+      }),
+    );
+    setAttached((prev) => [...prev, ...loaded.filter((a) => !prev.some((p) => p.file === a.file))]);
+    box.current?.focus();
   };
-  // A draft that carries attachments ("Edit in a branch") shows them as pictures again, not as tags.
+  // A draft that carries attachments ("Edit in a branch") shows them as thumbnails and chips again.
   useEffect(() => {
-    const { text, files } = splitImages(draft);
-    if (!files.length) return;
+    const { text, attachments } = splitAttachments(draft);
+    if (!attachments.length) return;
     setDraft(text);
-    void addImages(files);
+    void addPaths(attachments.map((a) => a.file));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  // Images become thumbnails: from where they are on disk, or saved to the temp folder when no file is
-  // behind them (a screenshot, an image dragged out of a web page). Other files' paths go in the text,
-  // the same as the + button.
+  // Dropped or pasted files are attached from where they are on disk. An image with no file behind it (a
+  // screenshot, an image dragged out of a web page), or in a format the app cannot show, is saved to the
+  // temp folder as PNG, JPEG or WebP first.
   const addFiles = async (files: File[]) => {
-    const images: string[] = [];
-    const others: string[] = [];
+    const paths: string[] = [];
     for (const f of files) {
       const where = window.ou.pathForFile(f);
-      if (f.type.startsWith("image/")) {
-        if (where && /\.(png|jpe?g|webp)$/i.test(where)) images.push(where);
-        else {
-          const saved = await window.ou.pasteImage(await f.arrayBuffer(), f.type);
-          if (saved) images.push(saved);
-        }
-      } else if (where) others.push(where);
+      const image = f.type.startsWith("image/");
+      if (where && (!image || isShownImage(where))) paths.push(where);
+      else if (image) {
+        const saved = await window.ou.pasteImage(await f.arrayBuffer(), f.type);
+        if (saved) paths.push(saved);
+      }
     }
-    if (images.length) await addImages(images);
-    if (others.length) {
-      const refs = others.map((p) => (/\s/.test(p) ? `"${p}"` : p)).join(" ");
-      const d = draftRef.current;
-      setDraft(d.trim() ? `${d.trimEnd()} ${refs} ` : `${refs} `);
-    }
-    box.current?.focus();
+    if (paths.length) await addPaths(paths);
   };
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const blobs = [...e.clipboardData.items]
@@ -583,17 +607,14 @@ function Composer({
   }, []);
   const send = () => {
     const t = draft.trim();
-    if ((!t && !images.length) || busy) return;
+    if ((!t && !attached.length) || busy) return;
     setDraft("");
-    setImages([]);
-    onSend(withImages(t, images.map((i) => i.file)));
+    setAttached([]);
+    onSend(withAttachments(t, attached));
   };
   const attach = async () => {
     const paths = await window.ou.pickFiles();
-    if (!paths.length) return;
-    const refs = paths.map((p) => (/\s/.test(p) ? `"${p}"` : p)).join(" ");
-    setDraft(draft.trim() ? `${draft.trimEnd()} ${refs} ` : `${refs} `);
-    box.current?.focus();
+    if (paths.length) await addPaths(paths);
   };
   return (
     <div className="px-6 pb-4 pt-2">
@@ -602,16 +623,20 @@ function Composer({
           className={`rounded-[16px] border transition-colors ${dragging ? "border-white/40 bg-[#383838]" : "border-[#404040] bg-[#303030] focus-within:border-[#4a4a4a]"}`}
         >
         {dragging && <div className="px-4 pt-3 text-[13px] text-fg-2">Drop images or files to attach them</div>}
-        {images.length > 0 && (
-          <div className="flex flex-wrap gap-2.5 px-3 pb-1 pt-3">
-            {images.map((img) => (
-              <div key={img.file} className="relative">
-                <button onClick={() => window.ou.openImage(img.file)} title={img.file} className="block overflow-hidden rounded-lg border border-white/10 hover:border-white/25">
-                  <img src={img.src} alt="" className="block h-16 w-16 object-cover" />
-                </button>
+        {attached.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2.5 px-3 pb-1 pt-3">
+            {attached.map((a) => (
+              <div key={a.file} className="relative">
+                {a.image ? (
+                  <button onClick={() => window.ou.openImage(a.file)} title={a.file} className="block overflow-hidden rounded-lg border border-white/10 hover:border-white/25">
+                    <img src={a.src} alt="" className="block h-16 w-16 object-cover" />
+                  </button>
+                ) : (
+                  <FileChip file={a.file} />
+                )}
                 <button
-                  onClick={() => setImages((prev) => prev.filter((p) => p.file !== img.file))}
-                  title="Remove image"
+                  onClick={() => setAttached((prev) => prev.filter((p) => p.file !== a.file))}
+                  title="Remove"
                   className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-white/20 bg-[#1f1f1f] text-fg-2 transition-colors hover:text-fg"
                 >
                   <X className="h-3 w-3" />
@@ -623,7 +648,7 @@ function Composer({
         <div className="flex items-end gap-1 py-[3px] pl-1.5 pr-1.5">
           <button
             onClick={attach}
-            title="Add files (their paths go in the message for the agent to read)"
+            title="Attach files or images (you can also paste or drop them)"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-fg transition-colors hover:bg-white/[0.08]"
           >
             <Plus className="h-4 w-4" />
@@ -650,7 +675,7 @@ function Composer({
           ) : (
             <button
               onClick={send}
-              disabled={!draft.trim() && !images.length}
+              disabled={!draft.trim() && !attached.length}
               title="Send (↵)"
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fg text-ink transition-opacity hover:bg-white disabled:bg-transparent disabled:text-fg-3"
             >
@@ -786,7 +811,7 @@ function AgentView({
           // After the first exchange, a fast model names the conversation (unless the user did).
           const c = convoRef.current;
           if (!c.named && c.turns.length === 2) {
-            const first = splitImages(c.turns[0].text).text;
+            const first = splitAttachments(c.turns[0].text).text;
             if (first) suggestTitle(first).then((t) => t && update(c.id, (x) => (x.named ? x : { ...x, title: t })));
           }
         }
@@ -800,7 +825,7 @@ function AgentView({
     setBusy(true);
     update(convo.id, (c) => ({
       ...c,
-      title: c.turns.length || c.title !== DEFAULT_TITLE ? c.title : (splitImages(prompt).text || "Pasted image").replace(/\s+/g, " ").slice(0, 60),
+      title: c.turns.length || c.title !== DEFAULT_TITLE ? c.title : titleOf(prompt),
       turns: [...c.turns, { role: "user", text: prompt }, { role: "assistant", text: "", items: [], model: c.model }],
       updated: Date.now(),
     }));
@@ -870,18 +895,7 @@ function AgentView({
           {convo.turns.map((t, i) =>
             t.role === "user" ? (
               <div key={i} className="group flex flex-col items-end gap-1">
-                {splitImages(t.text).files.length > 0 && (
-                  <div className="flex max-w-[85%] flex-wrap justify-end gap-2">
-                    {splitImages(t.text).files.map((f) => (
-                      <LocalImage key={f} file={f} small />
-                    ))}
-                  </div>
-                )}
-                {splitImages(t.text).text && (
-                  <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-white/[0.08] px-4 py-2.5 text-[14.5px] leading-relaxed">
-                    {splitImages(t.text).text}
-                  </div>
-                )}
+                <UserMessage text={t.text} />
                 {!busy && (
                   <button
                     onClick={() => onBranch(i, t.text)}
@@ -1011,6 +1025,40 @@ function AgentItemView({ item }: { item: AgentItem }) {
     case "error":
       return <div className="whitespace-pre-wrap break-words rounded-lg border border-bad/30 bg-bad/[0.06] px-3 py-2 text-[12.5px] text-bad">{item.text}</div>;
   }
+}
+
+// What the user sent: their attachments (thumbnails and chips), then their text. The <..._attached> tags
+// stay in the stored text for the agent; they are never shown.
+function UserMessage({ text }: { text: string }) {
+  const m = splitAttachments(text);
+  return (
+    <>
+      {m.attachments.length > 0 && (
+        <div className="flex max-w-[85%] flex-wrap items-center justify-end gap-2">
+          {m.attachments.map((a) => (a.image ? <LocalImage key={a.file} file={a.file} small /> : <FileChip key={a.file} file={a.file} />))}
+        </div>
+      )}
+      {m.text && (
+        <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-white/[0.08] px-4 py-2.5 text-[14.5px] leading-relaxed">
+          {m.text}
+        </div>
+      )}
+    </>
+  );
+}
+
+// An attached file that is not a picture: its name; a click shows it in Finder / Explorer.
+function FileChip({ file }: { file: string }) {
+  return (
+    <button
+      onClick={() => window.ou.showFile(file)}
+      title={file}
+      className="flex max-w-[260px] items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[12.5px] text-fg-2 transition-colors hover:border-white/25 hover:text-fg"
+    >
+      <File className="h-3.5 w-3.5 shrink-0" />
+      <span className="truncate">{baseName(file)}</span>
+    </button>
+  );
 }
 
 // A picture the image tool saved in the conversation's folder, or one the user pasted (small);

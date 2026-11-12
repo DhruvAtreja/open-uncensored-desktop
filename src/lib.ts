@@ -68,6 +68,7 @@ declare global {
       openImage(file: string): Promise<void>;
       pasteImage(bytes: ArrayBuffer, type: string): Promise<string | null>;
       pathForFile(file: File): string;
+      showFile(file: string): Promise<void>;
       request(opts: { url: string; method?: string; body?: unknown; auth?: boolean; claim?: string }): Promise<{ status: number; json: unknown }>;
       startChat(opts: { streamId: string; model: string; messages: { role: string; content: string }[] }): Promise<boolean>;
       stopChat(streamId: string): Promise<boolean>;
@@ -85,15 +86,21 @@ declare global {
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
-// Pasted images travel in the message text as <image_attached>path</image_attached>, after what the user
-// typed, so the agent (and a branch's agent, which gets the text) knows where the file is.
-const ATTACHED = /\n*<image_attached>([^<]+)<\/image_attached>/g;
-export const withImages = (text: string, files: string[]) =>
-  [text, ...files.map((f) => `<image_attached>${f}</image_attached>`)].filter(Boolean).join("\n\n");
-export function splitImages(text: string): { text: string; files: string[] } {
-  const files = [...text.matchAll(ATTACHED)].map((m) => m[1].trim());
-  return { text: text.replace(ATTACHED, "").trim(), files };
+// Attachments travel in the message text after what the user typed, as <image_attached>path</image_attached>
+// or <file_attached>path</file_attached>, so the agent (and a branch's agent, which gets the text) knows
+// where each file is. The app shows them as thumbnails and chips, never as paths.
+export type Attachment = { file: string; image: boolean };
+const ATTACHED = /\n*<(image|file)_attached>([^<]+)<\/\1_attached>/g;
+export const withAttachments = (text: string, list: Attachment[]) =>
+  [text, ...list.map((a) => (a.image ? `<image_attached>${a.file}</image_attached>` : `<file_attached>${a.file}</file_attached>`))]
+    .filter(Boolean)
+    .join("\n\n");
+export function splitAttachments(text: string): { text: string; attachments: Attachment[] } {
+  const attachments = [...text.matchAll(ATTACHED)].map((m) => ({ image: m[1] === "image", file: m[2].trim() }));
+  return { text: text.replace(ATTACHED, "").trim(), attachments };
 }
+export const baseName = (file: string) => file.split(/[\\/]/).pop() ?? file;
+export const isShownImage = (file: string) => /\.(png|jpe?g|webp)$/i.test(file); // what image:read shows
 
 // Model output is untrusted: raw HTML in it is shown as text, never rendered.
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
