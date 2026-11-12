@@ -1,5 +1,5 @@
 // The only bridge between the page and the system: no Node in the renderer.
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("ou", {
   platform: process.platform, // "darwin" or "win32": the page lays out the title bar to match
@@ -14,6 +14,15 @@ contextBridge.exposeInMainWorld("ou", {
   readImage: (file) => ipcRenderer.invoke("image:read", file),
   openImage: (file) => ipcRenderer.invoke("image:open", file),
   pasteImage: (bytes, type) => ipcRenderer.invoke("image:paste", { bytes, type }),
+  // Where a dropped or pasted file lives on disk ("" for one with no file behind it, such as an
+  // image dragged out of a web page).
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || "";
+    } catch {
+      return "";
+    }
+  },
   request: (opts) => ipcRenderer.invoke("net:request", opts),
   startChat: (opts) => ipcRenderer.invoke("chat:start", opts),
   stopChat: (streamId) => ipcRenderer.invoke("chat:stop", streamId),

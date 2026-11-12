@@ -512,19 +512,75 @@ function Composer({
     void addImages(files);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  // Images become thumbnails: from where they are on disk, or saved to the temp folder when no file is
+  // behind them (a screenshot, an image dragged out of a web page). Other files' paths go in the text,
+  // the same as the + button.
+  const addFiles = async (files: File[]) => {
+    const images: string[] = [];
+    const others: string[] = [];
+    for (const f of files) {
+      const where = window.ou.pathForFile(f);
+      if (f.type.startsWith("image/")) {
+        if (where && /\.(png|jpe?g|webp)$/i.test(where)) images.push(where);
+        else {
+          const saved = await window.ou.pasteImage(await f.arrayBuffer(), f.type);
+          if (saved) images.push(saved);
+        }
+      } else if (where) others.push(where);
+    }
+    if (images.length) await addImages(images);
+    if (others.length) {
+      const refs = others.map((p) => (/\s/.test(p) ? `"${p}"` : p)).join(" ");
+      const d = draftRef.current;
+      setDraft(d.trim() ? `${d.trimEnd()} ${refs} ` : `${refs} `);
+    }
+    box.current?.focus();
+  };
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const blobs = [...e.clipboardData.items]
       .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
       .map((i) => i.getAsFile())
       .filter((f): f is File => Boolean(f));
-    // Copied text often comes with a picture of itself (Word, web pages): that pastes as text.
-    if (!blobs.length || e.clipboardData.getData("text/plain")) return;
+    // Copied text often comes with a picture of itself (Word, web pages): that pastes as text. An image
+    // file copied in Finder also brings its name as text, but it is a real file, so it is attached.
+    const onDisk = blobs.some((b) => window.ou.pathForFile(b));
+    if (!blobs.length || (e.clipboardData.getData("text/plain") && !onDisk)) return;
     e.preventDefault();
-    void (async () => {
-      const saved = await Promise.all(blobs.map(async (b) => window.ou.pasteImage(await b.arrayBuffer(), b.type)));
-      await addImages(saved.filter((f): f is string => Boolean(f)));
-    })();
+    void addFiles(blobs);
   };
+  // Drag and drop anywhere in the window while a conversation is open.
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (e: DragEvent) => Boolean(e.dataTransfer?.types.includes("Files"));
+    const enter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth++;
+      setDragging(true);
+    };
+    const leave = (e: DragEvent) => {
+      if (!hasFiles(e) || --depth > 0) return;
+      depth = 0;
+      setDragging(false);
+    };
+    const drop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth = 0;
+      setDragging(false);
+      void addFiles([...(e.dataTransfer?.files ?? [])]);
+    };
+    window.addEventListener("dragenter", enter);
+    window.addEventListener("dragleave", leave);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragenter", enter);
+      window.removeEventListener("dragleave", leave);
+      window.removeEventListener("drop", drop);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const send = () => {
     const t = draft.trim();
     if ((!t && !images.length) || busy) return;
@@ -542,7 +598,10 @@ function Composer({
   return (
     <div className="px-6 pb-4 pt-2">
       <div className="mx-auto max-w-[760px]">
-        <div className="rounded-[16px] border border-[#404040] bg-[#303030] transition-colors focus-within:border-[#4a4a4a]">
+        <div
+          className={`rounded-[16px] border transition-colors ${dragging ? "border-white/40 bg-[#383838]" : "border-[#404040] bg-[#303030] focus-within:border-[#4a4a4a]"}`}
+        >
+        {dragging && <div className="px-4 pt-3 text-[13px] text-fg-2">Drop images or files to attach them</div>}
         {images.length > 0 && (
           <div className="flex flex-wrap gap-2.5 px-3 pb-1 pt-3">
             {images.map((img) => (

@@ -67,6 +67,7 @@ declare global {
       readImage(file: string): Promise<string | null>;
       openImage(file: string): Promise<void>;
       pasteImage(bytes: ArrayBuffer, type: string): Promise<string | null>;
+      pathForFile(file: File): string;
       request(opts: { url: string; method?: string; body?: unknown; auth?: boolean; claim?: string }): Promise<{ status: number; json: unknown }>;
       startChat(opts: { streamId: string; model: string; messages: { role: string; content: string }[] }): Promise<boolean>;
       stopChat(streamId: string): Promise<boolean>;
