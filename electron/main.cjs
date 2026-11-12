@@ -297,20 +297,21 @@ async function endRunsOf(threadId) {
   await within(Promise.all(old.map((r) => r.exited)), 8000);
 }
 
-// Each model's context window, from the public model list. Codex has no metadata for our models,
-// so without this it guesses a window and compacts the conversation too late (or never).
-let contextWindows = null;
-async function contextWindow(model) {
-  if (!contextWindows) {
+// Each model's context window and whether it reads images, from the public model list. Codex has no
+// metadata for our models, so without this it guesses a window and compacts the conversation too late
+// (or never), and it cannot know which models can look at a picture.
+let modelFacts = null;
+async function modelInfo(model) {
+  if (!modelFacts) {
     try {
       const res = await fetch(`${API}/models`, { headers: { "X-Title": "OpenUncensored Desktop" }, signal: AbortSignal.timeout(5000) });
       const body = await res.json();
-      contextWindows = Object.fromEntries((body.data || []).map((m) => [m.id, m.context_length]));
+      modelFacts = Object.fromEntries((body.data || []).map((m) => [m.id, { window: m.context_length, vision: (m.tags || []).includes("vision") }]));
     } catch {
-      return null; // try again next run
+      return {}; // try again next run
     }
   }
-  return contextWindows[model] || null;
+  return modelFacts[model] || {};
 }
 
 async function startAgent(win, { runId, threadId, prompt, cwd, model }) {
@@ -318,7 +319,11 @@ async function startAgent(win, { runId, threadId, prompt, cwd, model }) {
   if (!key) return { error: "Add an API key first." };
   const { bin, toolsDir } = codexBinary();
   const args = ["exec", "--json", "--skip-git-repo-check", "-m", model, "-C", cwd];
-  const window = await contextWindow(model);
+  const { window, vision } = await modelInfo(model);
+  // Models that read images (tagged vision in the API) get the agent's image viewer, so the agent can
+  // look at attached pictures and ones it made. For the rest it stays off: our router would replace
+  // the picture with a note, and the agent would only waste a step.
+  if (vision) args.push("-c", "features.view_image=true");
   if (window) {
     // Compact at 70% of the window, and by 250K tokens at most so long sessions stay cheap.
     const compactAt = Math.min(Math.floor(window * 0.7), 250000);
