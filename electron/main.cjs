@@ -333,6 +333,8 @@ async function chatStream(win, { streamId, model, messages }) {
 
 // ---------------------------------------------------------------------------- window
 
+let mainWindow = null;
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -368,7 +370,23 @@ function createWindow() {
   }
   if (process.env.OU_DEV_URL) win.loadURL(process.env.OU_DEV_URL);
   else win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+  mainWindow = win;
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
+  });
+  return win;
+}
 
+// The window that sent an IPC message (a closed window is reopened from the Dock as a new one, so
+// handlers never hold on to a particular window).
+const senderWindow = (e) => BrowserWindow.fromWebContents(e.sender);
+const openDialog = (e, properties) => {
+  const owner = senderWindow(e);
+  return owner ? dialog.showOpenDialog(owner, { properties }) : dialog.showOpenDialog({ properties });
+};
+
+// Registered once at startup: Electron refuses a second handler for the same channel.
+function registerIpc() {
   ipcMain.handle("key:get", () => readKey());
   ipcMain.handle("key:set", (_e, key) => {
     writeKey(key);
@@ -376,13 +394,13 @@ function createWindow() {
   });
   ipcMain.handle("conversations:get", () => readConversations());
   ipcMain.handle("conversations:set", (_e, list) => writeConversations(list));
-  ipcMain.handle("folder:pick", async () => {
+  ipcMain.handle("folder:pick", async (e) => {
     if (!app.isPackaged && process.env.OU_DEV_FOLDER) return process.env.OU_DEV_FOLDER; // development only
-    const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });
+    const r = await openDialog(e, ["openDirectory", "createDirectory"]);
     return r.canceled ? null : r.filePaths[0];
   });
-  ipcMain.handle("files:pick", async () => {
-    const r = await dialog.showOpenDialog(win, { properties: ["openFile", "multiSelections"] });
+  ipcMain.handle("files:pick", async (e) => {
+    const r = await openDialog(e, ["openFile", "multiSelections"]);
     return r.canceled ? [] : r.filePaths;
   });
   // Conversations without a project work in ~/OpenUncensored (~/Open Uncensored before 0.1.8,
@@ -443,7 +461,7 @@ function createWindow() {
   });
   ipcMain.handle("net:request", (_e, opts) => request(opts));
   ipcMain.handle("chat:start", (_e, opts) => {
-    chatStream(win, opts);
+    chatStream(senderWindow(_e), opts);
     return true;
   });
   ipcMain.handle("chat:stop", (_e, streamId) => {
@@ -456,8 +474,8 @@ function createWindow() {
     for (const child of runs.values()) child.kill("SIGINT"); // agent tasks stop; they resume from the conversation
     return updater.install();
   });
-  updater.onChange((s) => !win.isDestroyed() && win.webContents.send("update:state", { ...s, current: app.getVersion() }));
-  ipcMain.handle("agent:start", (_e, opts) => startAgent(win, opts));
+  updater.onChange((s) => mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.send("update:state", { ...s, current: app.getVersion() }));
+  ipcMain.handle("agent:start", (_e, opts) => startAgent(senderWindow(_e), opts));
   ipcMain.handle("agent:stop", (_e, runId) => {
     runs.get(runId)?.kill("SIGINT");
     return true;
@@ -493,13 +511,26 @@ function setMenu() {
 
 app.whenReady().then(() => {
   setMenu();
+  registerIpc();
   createWindow();
   installId();
   if (freshInstall) appEvent("app_install");
   appEvent("app_launch");
   updater.start();
 });
-app.on("window-all-closed", () => {
+// Agent tasks and chat streams report to the window that started them, so they stop when it closes
+// (the conversation keeps what was done; sending again carries on) and when the app quits.
+function stopWork() {
   for (const child of runs.values()) child.kill("SIGINT");
-  app.quit();
+  for (const ctrl of streams.values()) ctrl.abort();
+}
+// Mac: closing the window leaves the app running in the Dock, like other Mac apps; clicking the
+// Dock icon opens a new window. Windows: closing the window quits.
+app.on("window-all-closed", () => {
+  stopWork();
+  if (process.platform !== "darwin") app.quit();
 });
+app.on("activate", () => {
+  if (app.isReady() && BrowserWindow.getAllWindows().length === 0) createWindow();
+});
+app.on("before-quit", stopWork);
