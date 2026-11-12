@@ -1,7 +1,7 @@
 {
   "name": "open-uncensored-desktop",
   "productName": "OpenUncensored",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Chat and a coding agent on uncensored models, from OpenUncensored.",
   "license": "MIT",
   "private": true,
@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "vite build",
     "start": "vite build && electron .",
-    "dist": "vite build && electron-builder --mac --arm64",
+    "dist": "vite build && electron-builder --mac --arm64 && rm -rf release/mac-arm64",
     "dist:win": "vite build && electron-builder --win --x64 --publish never"
   },
   "dependencies": {

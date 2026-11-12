@@ -3,7 +3,7 @@
 //
 // Electron's built-in updater (Squirrel.Mac) only accepts apps signed with an Apple Developer ID,
 // and this app is ad-hoc signed, so the swap is done here instead:
-//   1. every 4 hours (and at launch) read the latest release; if its version is newer, download its
+//   1. at launch and every 30 minutes read the latest release; if its version is newer, download its
 //      "-mac-<arch>.zip", check the size and SHA-256 GitHub publishes, unpack it with ditto and check
 //      the new app's code signature is intact;
 //   2. on "Relaunch to update", a small detached shell script waits for this process to exit,
@@ -25,7 +25,9 @@ const { Readable } = require("node:stream");
 
 const REPO = "DhruvAtreja/open-uncensored-desktop";
 const FEED = process.env.OU_UPDATE_FEED || `https://api.github.com/repos/${REPO}/releases/latest`;
-const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
+// Every 30 minutes: with 4 hours, a copy left open did not offer a release made that morning until the
+// evening. Two unauthenticated GitHub API calls an hour is far under its 60 an hour per address.
+const CHECK_EVERY_MS = 30 * 60 * 1000;
 
 let state = { status: "idle" }; // idle | checking | downloading | ready | error
 let listeners = [];
