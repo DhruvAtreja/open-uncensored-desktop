@@ -139,6 +139,7 @@ export default function App() {
       }),
     [],
   );
+  const runs = useAgentRuns(update, refreshCredit, convos);
 
   // Every conversation is the agent: it chats, and it can work on files from its folder.
   const create = async (pick: boolean) => {
@@ -188,13 +189,15 @@ export default function App() {
     });
     setActiveId(convo.id);
   };
-  const remove = (id: string) =>
+  const remove = (id: string) => {
+    runs.stop(id); // a deleted conversation's task stops too
     setConvos((list) => {
       const next = list.filter((c) => c.id !== id);
       persist(next);
       if (activeId === id) setActiveId(null);
       return next;
     });
+  };
 
   if (key === undefined) return <div className="h-full bg-ink" />;
   if (!key) return <KeySetup onKey={(k) => window.ou.setKey(k).then(() => setKey(k))} />;
@@ -253,6 +256,11 @@ export default function App() {
                   {folderName(c.folder)} · {ago(c.updated)}
                 </p>
               </div>
+              {runs.busy.has(c.id) && (
+                <span title="Working" className="shrink-0 text-fg-3 group-hover:hidden">
+                  <Spinner className="h-3.5 w-3.5" />
+                </span>
+              )}
               <div className="hidden shrink-0 items-center group-hover:flex">
                 <button
                   onClick={(e) => {
@@ -315,6 +323,7 @@ export default function App() {
             key={active.id}
             convo={active}
             models={models}
+            runs={runs}
             update={update}
             onSpent={refreshCredit}
             onBranch={(upTo, draft) => branch(active, upTo, draft)}
@@ -739,39 +748,46 @@ function useAutoScroll(dep: unknown) {
 type Update = (id: string, fn: (c: Conversation) => Conversation) => void;
 
 
-function AgentView({
-  convo,
-  models,
-  update,
-  onSpent,
-  onBranch,
-  onOpen,
-  bar,
-}: {
-  convo: Conversation;
-  models: ModelInfo[];
-  update: Update;
-  onSpent: () => void;
-  onBranch: (upTo: number, draft?: string) => void;
-  onOpen: (id: string) => void;
-  bar: React.ReactNode;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [editingTitle, setEditingTitle] = useState(false);
-  const convoRef = useRef(convo);
-  convoRef.current = convo;
-  const [draft, setDraft] = useState(convo.draft ?? "");
-  // A branch made with "Edit in a branch" opens with the message in the composer, once.
-  useEffect(() => {
-    if (convo.draft !== undefined) update(convo.id, (c) => ({ ...c, draft: undefined }));
-  }, [convo.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  const runRef = useRef<string | null>(null);
-  const stoppedRef = useRef<string | null>(null); // the run the user pressed Stop on
-  const scroller = useAutoScroll(convo.turns);
+// Agent runs belong to the app, not to the open conversation's view: a run keeps reporting into its own
+// conversation while the user looks at another one (before 0.1.29 its events were dropped when the user
+// switched away, so the transcript froze while the work went on), and Stop / busy survive switching.
+type AgentRuns = {
+  busy: Set<string>; // conversation ids with a run in progress
+  send: (convo: Conversation, prompt: string) => Promise<void>;
+  stop: (convoId: string) => void;
+};
+
+function useAgentRuns(update: Update, onSpent: () => void, convos: Conversation[]): AgentRuns {
+  const [busy, setBusy] = useState<Set<string>>(() => new Set());
+  const runOf = useRef(new Map<string, string>()); // runId -> conversation id
+  const stopped = useRef(new Set<string>()); // runs the user pressed Stop on
+  const convosRef = useRef(convos);
+  convosRef.current = convos;
+
+  const setRunning = useCallback((convoId: string, on: boolean) => {
+    setBusy((prev) => {
+      if (prev.has(convoId) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(convoId);
+      else next.delete(convoId);
+      return next;
+    });
+  }, []);
+
+  const finish = useCallback(
+    (runId: string) => {
+      const convoId = runOf.current.get(runId);
+      runOf.current.delete(runId);
+      stopped.current.delete(runId);
+      if (convoId && ![...runOf.current.values()].includes(convoId)) setRunning(convoId, false);
+      onSpent();
+    },
+    [onSpent, setRunning],
+  );
 
   const upsert = useCallback(
-    (item: AgentItem) =>
-      update(convo.id, (c) => {
+    (convoId: string, item: AgentItem) =>
+      update(convoId, (c) => {
         const turns = [...c.turns];
         const last = { ...turns[turns.length - 1] };
         const items = [...(last.items ?? [])];
@@ -782,28 +798,30 @@ function AgentView({
         turns[turns.length - 1] = last;
         return { ...c, turns, updated: Date.now() };
       }),
-    [convo.id, update],
+    [update],
   );
 
   useEffect(
     () =>
       window.ou.onAgentEvent(({ runId, event }) => {
-        if (runId !== runRef.current) return;
+        const convoId = runOf.current.get(runId);
+        if (!convoId) return;
+        const put = (item: AgentItem) => upsert(convoId, item);
         const type = event.type as string;
         const item = (event.item ?? {}) as Record<string, unknown>;
         if (type === "thread.started") {
-          update(convo.id, (c) => ({ ...c, threadId: event.thread_id as string }));
+          update(convoId, (c) => ({ ...c, threadId: event.thread_id as string }));
         } else if (type.startsWith("item.")) {
           const id = String(item.id);
           switch (item.type) {
             case "agent_message":
-              upsert({ kind: "message", id, text: String(item.text ?? "") });
+              put({ kind: "message", id, text: String(item.text ?? "") });
               break;
             case "reasoning":
-              upsert({ kind: "reasoning", id, text: String(item.text ?? "") });
+              put({ kind: "reasoning", id, text: String(item.text ?? "") });
               break;
             case "command_execution":
-              upsert({
+              put({
                 kind: "command",
                 id,
                 command: String(item.command ?? ""),
@@ -814,7 +832,7 @@ function AgentView({
               break;
             case "file_change": {
               const changes = (item.changes as { path: string; kind: string }[]) ?? [];
-              upsert({ kind: "file", id, summary: changes.map((c) => `${c.kind}\t${c.path}`).join("\n") });
+              put({ kind: "file", id, summary: changes.map((c) => `${c.kind}\t${c.path}`).join("\n") });
               break;
             }
             case "mcp_tool_call": {
@@ -825,69 +843,102 @@ function AgentView({
               const files = result.structured_content?.files ?? [];
               const text = (result.content ?? []).map((c) => c.text ?? "").join("\n");
               const error = (item.error as { message?: string } | null)?.message ?? (item.status === "failed" || (!files.length && type === "item.completed") ? text || "Image generation failed." : "");
-              upsert({ kind: "image", id, prompt: String(args.prompt ?? ""), model: String(args.model ?? (Array.isArray(args.reference_images) && args.reference_images.length ? "qwen-edit-uncensored" : "z-image-turbo")), files, error, running: type !== "item.completed" });
+              put({ kind: "image", id, prompt: String(args.prompt ?? ""), model: String(args.model ?? (Array.isArray(args.reference_images) && args.reference_images.length ? "qwen-image-3-edit" : "z-image-turbo")), files, error, running: type !== "item.completed" });
               break;
             }
             case "error":
-              if (!String(item.message).startsWith("Model metadata")) upsert({ kind: "error", id, text: agentError(String(item.message ?? "")) });
+              if (!String(item.message).startsWith("Model metadata")) put({ kind: "error", id, text: agentError(String(item.message ?? "")) });
               break;
           }
         } else if (type === "turn.failed" || type === "error") {
           const message = String((event.error as { message?: string })?.message ?? event.message ?? "The agent stopped.");
-          upsert({ kind: "error", id: uid(), text: agentError(message) });
+          put({ kind: "error", id: uid(), text: agentError(message) });
         } else if (type === "run.exited") {
           // A run the user stopped exits with an error by design: nothing to report.
-          if (event.code && event.stderr && stoppedRef.current !== runId) upsert({ kind: "error", id: uid(), text: agentError(String(event.stderr)) });
-          update(convo.id, (c) => ({ ...c, turns: settleRunning(c.turns) }));
-          runRef.current = null;
-          setBusy(false);
-          onSpent();
+          if (event.code && event.stderr && !stopped.current.has(runId)) put({ kind: "error", id: uid(), text: agentError(String(event.stderr)) });
+          update(convoId, (c) => ({ ...c, turns: settleRunning(c.turns) }));
+          finish(runId);
           // After the first exchange, a fast model names the conversation (unless the user did).
-          const c = convoRef.current;
-          if (!c.named && c.turns.length === 2) {
+          const c = convosRef.current.find((x) => x.id === convoId);
+          if (c && !c.named && c.turns.length === 2) {
             const first = splitAttachments(c.turns[0].text).text;
-            if (first) suggestTitle(first).then((t) => t && update(c.id, (x) => (x.named ? x : { ...x, title: t })));
+            if (first) suggestTitle(first).then((t) => t && update(convoId, (x) => (x.named ? x : { ...x, title: t })));
           }
         }
       }),
-    [convo.id, update, upsert, onSpent],
+    [update, upsert, finish],
   );
 
-  const send = async (prompt: string) => {
-    const runId = uid();
-    runRef.current = runId;
-    setBusy(true);
-    update(convo.id, (c) => ({
-      ...c,
-      title: c.turns.length || c.title !== DEFAULT_TITLE ? c.title : titleOf(prompt),
-      turns: [...c.turns, { role: "user", text: prompt }, { role: "assistant", text: "", items: [], model: c.model }],
-      updated: Date.now(),
-    }));
-    // The first message of a branch starts a new agent session: give it the conversation so far.
-    const agentPrompt = !convo.threadId && convo.turns.length > 0 ? branchContext(convo.turns) + prompt : prompt;
-    const r = await window.ou.startAgent({ runId, threadId: convo.threadId, prompt: agentPrompt, cwd: convo.folder!, model: convo.model });
-    if (r.error) {
-      upsert({ kind: "error", id: uid(), text: agentError(r.error) });
-      runRef.current = null;
-      setBusy(false);
-    }
-  };
+  const send = useCallback(
+    async (convo: Conversation, prompt: string) => {
+      const runId = uid();
+      runOf.current.set(runId, convo.id);
+      setRunning(convo.id, true);
+      update(convo.id, (c) => ({
+        ...c,
+        title: c.turns.length || c.title !== DEFAULT_TITLE ? c.title : titleOf(prompt),
+        turns: [...c.turns, { role: "user", text: prompt }, { role: "assistant", text: "", items: [], model: c.model }],
+        updated: Date.now(),
+      }));
+      // The first message of a branch starts a new agent session: give it the conversation so far.
+      const agentPrompt = !convo.threadId && convo.turns.length > 0 ? branchContext(convo.turns) + prompt : prompt;
+      const r = await window.ou.startAgent({ runId, threadId: convo.threadId, prompt: agentPrompt, cwd: convo.folder!, model: convo.model });
+      if (r.error) {
+        upsert(convo.id, { kind: "error", id: uid(), text: agentError(r.error) });
+        finish(runId);
+      }
+    },
+    [update, upsert, finish, setRunning],
+  );
 
   // Stop ends the run and everything it started. If the run has not reported back within 3 seconds, the
   // conversation is freed anyway, so it can never stay stuck on "working".
-  const stop = () => {
-    const runId = runRef.current;
-    if (!runId) return setBusy(false);
-    stoppedRef.current = runId;
-    void window.ou.stopAgent(runId);
-    update(convo.id, (c) => ({ ...c, turns: settleRunning(c.turns) }));
-    setTimeout(() => {
-      if (runRef.current !== runId) return;
-      runRef.current = null;
-      setBusy(false);
-      onSpent();
-    }, 3000);
-  };
+  const stop = useCallback(
+    (convoId: string) => {
+      const ids = [...runOf.current].filter(([, c]) => c === convoId).map(([r]) => r);
+      if (!ids.length) return setRunning(convoId, false);
+      update(convoId, (c) => ({ ...c, turns: settleRunning(c.turns) }));
+      for (const runId of ids) {
+        stopped.current.add(runId);
+        void window.ou.stopAgent(runId);
+        setTimeout(() => runOf.current.has(runId) && finish(runId), 3000);
+      }
+    },
+    [update, finish, setRunning],
+  );
+
+  return useMemo(() => ({ busy, send, stop }), [busy, send, stop]);
+}
+
+function AgentView({
+  convo,
+  models,
+  runs,
+  update,
+  onSpent,
+  onBranch,
+  onOpen,
+  bar,
+}: {
+  convo: Conversation;
+  models: ModelInfo[];
+  runs: AgentRuns;
+  update: Update;
+  onSpent: () => void;
+  onBranch: (upTo: number, draft?: string) => void;
+  onOpen: (id: string) => void;
+  bar: React.ReactNode;
+}) {
+  const busy = runs.busy.has(convo.id);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [draft, setDraft] = useState(convo.draft ?? "");
+  // A branch made with "Edit in a branch" opens with the message in the composer, once.
+  useEffect(() => {
+    if (convo.draft !== undefined) update(convo.id, (c) => ({ ...c, draft: undefined }));
+  }, [convo.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const scroller = useAutoScroll(convo.turns);
+  const send = (prompt: string) => runs.send(convo, prompt);
+  const stop = () => runs.stop(convo.id);
 
   const modelName = (id?: string) => models.find((m) => m.id === id)?.name ?? id ?? "";
   const lastItems = convo.turns[convo.turns.length - 1]?.items ?? [];

@@ -14,7 +14,7 @@ const readline = require("node:readline");
 
 const API = process.env.OU_API_BASE || "https://api.openuncensored.com/v1";
 const DEFAULT_MODEL = "z-image-turbo";
-const DEFAULT_EDIT_MODEL = "qwen-edit-uncensored"; // when reference images are given
+const DEFAULT_EDIT_MODEL = "qwen-image-3-edit"; // when reference images are given (best in Dhruv's tests, 2026-11-12)
 const MAX_REF_BYTES = 20 * 1024 * 1024;
 const SIZES = ["1024x1024", "1024x1536", "1536x1024", "1024x1792", "1792x1024", "512x512"];
 
@@ -27,7 +27,7 @@ const TOOLS = [
       "Call list_image_models to see every model. Good picks: z-image-turbo (fast photoreal, default), lustify-v8 (explicit photo), " +
       "wai-illustrious (anime; start the prompt with 'masterpiece, best quality'), pony-diffusion-v6 (stylised; start with 'score_9, score_8_up, score_7_up'), chroma (strong prompt following). " +
       "To keep a character, person or object from existing pictures (same face and outfit in a new scene, a new pose, a restyle), pass their file paths as reference_images: " +
-      "the default model is then qwen-edit-uncensored (up to 3 references, adult content allowed); seedream-v5-5-edit keeps one character most consistently (up to 10). " +
+      "the default model is then qwen-image-3-edit (the best edits, high detail, up to 3 references); qwen-edit-uncensored is the alternative for edits it refuses; seedream-v5-5-edit keeps one character most consistently (up to 10). " +
       "In the prompt, say what must stay the same and what changes.",
     inputSchema: {
       type: "object",
