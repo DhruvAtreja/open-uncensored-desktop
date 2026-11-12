@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Pencil, Plus, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
+import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Pencil, Pin, Plus, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
 import {
   agentError,
   type AgentItem,
@@ -106,7 +106,7 @@ export default function App() {
     window.ou.getKey().then(setKey);
     // Empty, never-named conversations left from earlier sessions are dropped on launch.
     window.ou.getConversations().then((list) =>
-      setConvos(list.filter((c) => c.kind === "agent" && (c.turns.length > 0 || c.named)).map((c) => ({ ...c, turns: settleRunning(c.turns) }))),
+      setConvos(list.filter((c) => c.kind === "agent" && (c.turns.length > 0 || c.named || c.pinned)).map((c) => ({ ...c, turns: settleRunning(c.turns) }))),
     );
     fetchModels().then(setModels).catch(() => setModels([]));
   }, []);
@@ -204,35 +204,10 @@ export default function App() {
 
   const active = convos.find((c) => c.id === activeId) ?? null;
   const sorted = [...convos].sort((a, b) => b.updated - a.updated);
-  return (
-    <div className="flex h-full text-fg">
-      {sidebar && (
-      <aside style={{ width }} className="relative flex shrink-0 flex-col border-r border-white/[0.06] bg-ink-2">
-        <div className={`drag flex h-[52px] shrink-0 items-center pr-2 ${WIN ? "pl-3" : "pl-[84px]"}`}>
-          <img src={logo} alt="" className="h-[18px] w-[18px] rounded-[5px]" />
-          <span className="ml-2 min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight">OpenUncensored</span>
-          <button onClick={() => setSidebar(false)} title={`Hide sidebar (${MOD}\\)`} className="no-drag rounded-md p-1.5 text-fg-3 hover:bg-white/[0.07] hover:text-fg">
-            <Sidebar className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="flex gap-1.5 px-3 pb-3">
-          <button
-            onClick={() => create(false)}
-            className="no-drag flex flex-1 items-center gap-2 rounded-lg bg-white/[0.07] px-3 py-2 text-[13px] font-medium text-fg transition-colors hover:bg-white/[0.11]"
-          >
-            <Plus className="h-4 w-4" /> New conversation
-          </button>
-          <button
-            onClick={() => create(true)}
-            title="Open a project folder"
-            className="no-drag flex w-9 items-center justify-center rounded-lg text-fg-2 transition-colors hover:bg-white/[0.07] hover:text-fg"
-          >
-            <Folder className="h-4 w-4" />
-          </button>
-        </div>
-        <nav className="flex-1 overflow-y-auto px-2 pb-2">
-          {sorted.length > 0 && <p className="px-2.5 pb-1.5 pt-1 text-[10.5px] font-medium uppercase tracking-wider text-fg-3">Recent</p>}
-          {sorted.map((c) => (
+  const pinned = sorted.filter((c) => c.pinned);
+  const recent = sorted.filter((c) => !c.pinned);
+  const togglePin = (id: string) => update(id, (c) => ({ ...c, pinned: !c.pinned || undefined }));
+  const row = (c: Conversation) => (
             <div
               key={c.id}
               onClick={() => setActiveId(c.id)}
@@ -265,6 +240,16 @@ export default function App() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    togglePin(c.id);
+                  }}
+                  title={c.pinned ? "Unpin" : "Pin"}
+                  className={`rounded-md p-1 hover:bg-white/[0.08] hover:text-fg ${c.pinned ? "text-fg" : "text-fg-3"}`}
+                >
+                  <Pin className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setRenaming(c.id);
                   }}
                   title="Rename"
@@ -283,8 +268,40 @@ export default function App() {
                   <Trash className="h-3.5 w-3.5" />
                 </button>
               </div>
-            </div>
-          ))}
+            </div>);
+  return (
+    <div className="flex h-full text-fg">
+      {sidebar && (
+      <aside style={{ width }} className="relative flex shrink-0 flex-col border-r border-white/[0.06] bg-ink-2">
+        <div className={`drag flex h-[52px] shrink-0 items-center pr-2 ${WIN ? "pl-3" : "pl-[84px]"}`}>
+          <img src={logo} alt="" className="h-[18px] w-[18px] rounded-[5px]" />
+          <span className="ml-2 min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight">OpenUncensored</span>
+          <button onClick={() => setSidebar(false)} title={`Hide sidebar (${MOD}\\)`} className="no-drag rounded-md p-1.5 text-fg-3 hover:bg-white/[0.07] hover:text-fg">
+            <Sidebar className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex gap-1.5 px-3 pb-3">
+          <button
+            onClick={() => create(false)}
+            className="no-drag flex flex-1 items-center gap-2 rounded-lg bg-white/[0.07] px-3 py-2 text-[13px] font-medium text-fg transition-colors hover:bg-white/[0.11]"
+          >
+            <Plus className="h-4 w-4" /> New conversation
+          </button>
+          <button
+            onClick={() => create(true)}
+            title="Open a project folder"
+            className="no-drag flex w-9 items-center justify-center rounded-lg text-fg-2 transition-colors hover:bg-white/[0.07] hover:text-fg"
+          >
+            <Folder className="h-4 w-4" />
+          </button>
+        </div>
+        <nav className="flex-1 overflow-y-auto px-2 pb-2">
+          {pinned.length > 0 && <p className="px-2.5 pb-1.5 pt-1 text-[10.5px] font-medium uppercase tracking-wider text-fg-3">Pinned</p>}
+          {pinned.map(row)}
+          {recent.length > 0 && (
+            <p className={`px-2.5 pb-1.5 text-[10.5px] font-medium uppercase tracking-wider text-fg-3 ${pinned.length ? "pt-4" : "pt-1"}`}>Recent</p>
+          )}
+          {recent.map(row)}
         </nav>
         {appUpdate.status === "ready" && (
           <button

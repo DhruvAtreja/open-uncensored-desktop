@@ -78,6 +78,7 @@ export interface Conversation {
   threadId?: string; // agent mode: Codex thread to resume
   named?: boolean; // the user renamed it: never auto-title over it
   modelPicked?: boolean; // the user chose the model: never switch it to the current #1
+  pinned?: boolean; // shown in the sidebar's Pinned section, above Recent
   branchedFrom?: { id: string; title: string }; // made with "Branch from here" / "Edit in a branch"
   draft?: string; // text to put in the composer when the conversation opens (an edited message)
   turns: Turn[];
