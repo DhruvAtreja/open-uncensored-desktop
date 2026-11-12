@@ -25,7 +25,19 @@ export type AgentItem =
 // Agent errors in plain words. The agent is built on the open source Codex CLI, but users never need to
 // know that: its log prefixes and internal names are removed, and the errors we know get a sentence.
 export function agentError(raw: string): string {
-  const text = String(raw ?? "");
+  let text = String(raw ?? "");
+  // API errors arrive as JSON ({"error": {"message": ...}}): keep just the message.
+  const quoted = text.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (quoted) {
+    try {
+      text = JSON.parse(`"${quoted[1]}"`);
+    } catch {
+      text = quoted[1];
+    }
+  }
+  if (/maximum context length|context[_ ]length[_ ]exceeded|prompt is too long|too many (input )?tokens/i.test(text)) {
+    return "This conversation is too long for the model. Start a new conversation, or branch from an earlier message.";
+  }
   if (/already has an active writer|thread-store conflict/i.test(text)) {
     return "The previous task in this conversation was still stopping. Send your message again.";
   }

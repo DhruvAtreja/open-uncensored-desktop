@@ -824,6 +824,19 @@ function useAgentRuns(update: Update, onSpent: () => void, convos: Conversation[
         const convoId = runOf.current.get(runId);
         if (!convoId) return;
         const put = (item: AgentItem) => upsert(convoId, item);
+        // The same failure is often reported twice (as an item and as turn.failed): show it once.
+        const putError = (text: string) =>
+          update(convoId, (c) => {
+            const last = c.turns[c.turns.length - 1];
+            if (last?.items?.some((i) => i.kind === "error" && i.text === text)) return c;
+            const turns = [...c.turns];
+            turns[turns.length - 1] = { ...last, items: [...(last.items ?? []), { kind: "error", id: uid(), text }] };
+            return { ...c, turns, updated: Date.now() };
+          });
+        const hasError = () => {
+          const c = convosRef.current.find((x) => x.id === convoId);
+          return Boolean(c?.turns[c.turns.length - 1]?.items?.some((i) => i.kind === "error"));
+        };
         const type = event.type as string;
         const item = (event.item ?? {}) as Record<string, unknown>;
         if (type === "thread.started") {
@@ -864,15 +877,16 @@ function useAgentRuns(update: Update, onSpent: () => void, convos: Conversation[
               break;
             }
             case "error":
-              if (!String(item.message).startsWith("Model metadata")) put({ kind: "error", id, text: agentError(String(item.message ?? "")) });
+              if (!String(item.message).startsWith("Model metadata")) putError(agentError(String(item.message ?? "")));
               break;
           }
         } else if (type === "turn.failed" || type === "error") {
           const message = String((event.error as { message?: string })?.message ?? event.message ?? "The agent stopped.");
-          put({ kind: "error", id: uid(), text: agentError(message) });
+          putError(agentError(message));
         } else if (type === "run.exited") {
           // A run the user stopped exits with an error by design: nothing to report.
-          if (event.code && event.stderr && !stopped.current.has(runId)) put({ kind: "error", id: uid(), text: agentError(String(event.stderr)) });
+          // The exit log only matters when nothing better was reported ("The agent stopped." after a real error is noise).
+          if (event.code && event.stderr && !stopped.current.has(runId) && !hasError()) putError(agentError(String(event.stderr)));
           update(convoId, (c) => ({ ...c, turns: settleRunning(c.turns) }));
           finish(runId);
           // After the first exchange, a fast model names the conversation (unless the user did).
