@@ -1,7 +1,7 @@
 # OpenUncensored Desktop
 
-A desktop agent for uncensored models. Chat with it, or point it at a folder and let it read, write and
-run code for you, on any of the uncensored and abliterated models served by
+A desktop agent for uncensored models. Chat with it, generate and edit images, or point it at a folder and
+let it read, write and run code for you, on any of the uncensored and abliterated models served by
 [OpenUncensored](https://openuncensored.com).
 
 - **One app for chat and agent work.** Every conversation is an agent: ask a question and it answers;

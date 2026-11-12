@@ -460,7 +460,7 @@ function Home({ onNew, bar }: { onNew: (pick: boolean) => void; bar: React.React
         <img src={logo} alt="" className="h-12 w-12 rounded-xl" />
         <h1 className="mt-5 text-[26px] font-semibold tracking-tight">What are we doing today?</h1>
         <p className="mt-2 max-w-sm text-[13.5px] leading-relaxed text-fg-2">
-          Ask anything, or open a project and let the agent read, write and run code for you.
+          Ask anything, generate and edit images, or open a project and let the agent read, write and run code for you.
         </p>
         <div className="mt-7 flex gap-2.5">
           <button onClick={() => onNew(false)} className="flex items-center gap-2 rounded-lg bg-fg px-4 py-2.5 text-[13px] font-medium text-ink transition-colors hover:bg-white">
