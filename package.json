@@ -1,7 +1,7 @@
 {
   "name": "open-uncensored-desktop",
   "productName": "OpenUncensored",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "Chat and a coding agent on uncensored models, from OpenUncensored.",
   "license": "MIT",
   "private": true,
@@ -57,7 +57,7 @@
         }
       ],
       "category": "public.app-category.developer-tools",
-      "icon": "build/icon.png",
+      "icon": "build/icon-mac.png",
       "identity": "-",
       "hardenedRuntime": false,
       "artifactName": "OpenUncensored-${version}-mac-${arch}.${ext}"
