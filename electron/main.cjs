@@ -236,8 +236,8 @@ async function startAgent(win, { runId, threadId, prompt, cwd, model }) {
   const args = ["exec", "--json", "--skip-git-repo-check", "-m", model, "-C", cwd];
   const window = await contextWindow(model);
   if (window) {
-    // Compact at 80% of the window, and by 250K tokens at most so long sessions stay cheap.
-    const compactAt = Math.min(Math.floor(window * 0.8), 250000);
+    // Compact at 70% of the window, and by 250K tokens at most so long sessions stay cheap.
+    const compactAt = Math.min(Math.floor(window * 0.7), 250000);
     args.push("-c", `model_context_window=${window}`, "-c", `model_auto_compact_token_limit=${compactAt}`);
   }
   if (threadId) args.push("resume", threadId, prompt);
