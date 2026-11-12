@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Pencil, Plus, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
-import { type AgentItem, type UpdateState, balance, branchContext, type Conversation, FEEDBACK_KINDS, fetchModels, md, type ModelInfo, pollPurchase, sendFeedback, startPurchase, suggestTitle, uid } from "./lib";
+import { type AgentItem, type UpdateState, balance, branchContext, type Conversation, FEEDBACK_KINDS, fetchModels, md, type ModelInfo, pollPurchase, sendFeedback, splitImages, startPurchase, suggestTitle, uid, withImages } from "./lib";
 import logo from "./logo.svg";
 import { ModelPicker } from "./ModelPicker";
 
@@ -498,11 +498,39 @@ function Composer({
     t.style.height = `${Math.min(t.scrollHeight, 220)}px`;
   }, [draft]);
   useEffect(() => box.current?.focus(), []);
+  // Pasted images: saved to a temp folder, shown here, and sent as <image_attached> paths after the text.
+  const [images, setImages] = useState<{ file: string; src: string }[]>([]);
+  const addImages = async (files: string[]) => {
+    const loaded = await Promise.all(files.map(async (file) => ({ file, src: (await window.ou.readImage(file)) ?? "" })));
+    setImages((prev) => [...prev, ...loaded.filter((i) => i.src && !prev.some((p) => p.file === i.file))]);
+  };
+  // A draft that carries attachments ("Edit in a branch") shows them as pictures again, not as tags.
+  useEffect(() => {
+    const { text, files } = splitImages(draft);
+    if (!files.length) return;
+    setDraft(text);
+    void addImages(files);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const blobs = [...e.clipboardData.items]
+      .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
+      .map((i) => i.getAsFile())
+      .filter((f): f is File => Boolean(f));
+    // Copied text often comes with a picture of itself (Word, web pages): that pastes as text.
+    if (!blobs.length || e.clipboardData.getData("text/plain")) return;
+    e.preventDefault();
+    void (async () => {
+      const saved = await Promise.all(blobs.map(async (b) => window.ou.pasteImage(await b.arrayBuffer(), b.type)));
+      await addImages(saved.filter((f): f is string => Boolean(f)));
+    })();
+  };
   const send = () => {
     const t = draft.trim();
-    if (!t || busy) return;
+    if ((!t && !images.length) || busy) return;
     setDraft("");
-    onSend(t);
+    setImages([]);
+    onSend(withImages(t, images.map((i) => i.file)));
   };
   const attach = async () => {
     const paths = await window.ou.pickFiles();
@@ -514,7 +542,26 @@ function Composer({
   return (
     <div className="px-6 pb-4 pt-2">
       <div className="mx-auto max-w-[760px]">
-        <div className="flex items-end gap-1 rounded-[16px] border border-[#404040] bg-[#303030] py-[3px] pl-1.5 pr-1.5 transition-colors focus-within:border-[#4a4a4a]">
+        <div className="rounded-[16px] border border-[#404040] bg-[#303030] transition-colors focus-within:border-[#4a4a4a]">
+        {images.length > 0 && (
+          <div className="flex flex-wrap gap-2.5 px-3 pb-1 pt-3">
+            {images.map((img) => (
+              <div key={img.file} className="relative">
+                <button onClick={() => window.ou.openImage(img.file)} title={img.file} className="block overflow-hidden rounded-lg border border-white/10 hover:border-white/25">
+                  <img src={img.src} alt="" className="block h-16 w-16 object-cover" />
+                </button>
+                <button
+                  onClick={() => setImages((prev) => prev.filter((p) => p.file !== img.file))}
+                  title="Remove image"
+                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-white/20 bg-[#1f1f1f] text-fg-2 transition-colors hover:text-fg"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex items-end gap-1 py-[3px] pl-1.5 pr-1.5">
           <button
             onClick={attach}
             title="Add files (their paths go in the message for the agent to read)"
@@ -526,6 +573,7 @@ function Composer({
             ref={box}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            onPaste={onPaste}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
@@ -543,13 +591,14 @@ function Composer({
           ) : (
             <button
               onClick={send}
-              disabled={!draft.trim()}
+              disabled={!draft.trim() && !images.length}
               title="Send (↵)"
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fg text-ink transition-opacity hover:bg-white disabled:bg-transparent disabled:text-fg-3"
             >
               <ArrowUp className="h-4 w-4" />
             </button>
           )}
+        </div>
         </div>
         <div className="mt-2 flex items-center justify-end gap-4 pr-1 text-[13px]">
           {picker}
@@ -678,7 +727,8 @@ function AgentView({
           // After the first exchange, a fast model names the conversation (unless the user did).
           const c = convoRef.current;
           if (!c.named && c.turns.length === 2) {
-            suggestTitle(c.turns[0].text).then((t) => t && update(c.id, (x) => (x.named ? x : { ...x, title: t })));
+            const first = splitImages(c.turns[0].text).text;
+            if (first) suggestTitle(first).then((t) => t && update(c.id, (x) => (x.named ? x : { ...x, title: t })));
           }
         }
       }),
@@ -691,7 +741,7 @@ function AgentView({
     setBusy(true);
     update(convo.id, (c) => ({
       ...c,
-      title: c.turns.length || c.title !== DEFAULT_TITLE ? c.title : prompt.replace(/\s+/g, " ").slice(0, 60),
+      title: c.turns.length || c.title !== DEFAULT_TITLE ? c.title : (splitImages(prompt).text || "Pasted image").replace(/\s+/g, " ").slice(0, 60),
       turns: [...c.turns, { role: "user", text: prompt }, { role: "assistant", text: "", items: [], model: c.model }],
       updated: Date.now(),
     }));
@@ -761,9 +811,18 @@ function AgentView({
           {convo.turns.map((t, i) =>
             t.role === "user" ? (
               <div key={i} className="group flex flex-col items-end gap-1">
-                <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-white/[0.08] px-4 py-2.5 text-[14.5px] leading-relaxed">
-                  {t.text}
-                </div>
+                {splitImages(t.text).files.length > 0 && (
+                  <div className="flex max-w-[85%] flex-wrap justify-end gap-2">
+                    {splitImages(t.text).files.map((f) => (
+                      <LocalImage key={f} file={f} small />
+                    ))}
+                  </div>
+                )}
+                {splitImages(t.text).text && (
+                  <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-white/[0.08] px-4 py-2.5 text-[14.5px] leading-relaxed">
+                    {splitImages(t.text).text}
+                  </div>
+                )}
                 {!busy && (
                   <button
                     onClick={() => onBranch(i, t.text)}
@@ -895,8 +954,9 @@ function AgentItemView({ item }: { item: AgentItem }) {
   }
 }
 
-// A picture the image tool saved in the conversation's folder; opens in Preview on click.
-function LocalImage({ file }: { file: string }) {
+// A picture the image tool saved in the conversation's folder, or one the user pasted (small);
+// opens in the default image viewer on click.
+function LocalImage({ file, small = false }: { file: string; small?: boolean }) {
   const [src, setSrc] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     let live = true;
@@ -905,10 +965,16 @@ function LocalImage({ file }: { file: string }) {
       live = false;
     };
   }, [file]);
-  if (src === null) return <span className="rounded-md bg-white/[0.04] px-2 py-1 font-mono text-[11.5px] text-fg-3">{file.split("/").pop()} (moved or deleted)</span>;
+  if (src === null) return <span className="rounded-md bg-white/[0.04] px-2 py-1 font-mono text-[11.5px] text-fg-3">{file.split(/[\\/]/).pop()} (moved or deleted)</span>;
   return (
     <button onClick={() => window.ou.openImage(file)} title={file} className="overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] hover:border-white/20">
-      {src ? <img src={src} alt="" className="block max-h-[360px] max-w-[360px] object-contain" /> : <div className="grid h-[200px] w-[200px] place-items-center"><Spinner /></div>}
+      {src ? (
+        <img src={src} alt="" className={`block object-contain ${small ? "max-h-[180px] max-w-[240px]" : "max-h-[360px] max-w-[360px]"}`} />
+      ) : (
+        <div className={`grid place-items-center ${small ? "h-[100px] w-[100px]" : "h-[200px] w-[200px]"}`}>
+          <Spinner />
+        </div>
+      )}
     </button>
   );
 }

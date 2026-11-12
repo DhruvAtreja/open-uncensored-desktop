@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("ou", {
   openUrl: (url) => ipcRenderer.invoke("open:url", url),
   readImage: (file) => ipcRenderer.invoke("image:read", file),
   openImage: (file) => ipcRenderer.invoke("image:open", file),
+  pasteImage: (bytes, type) => ipcRenderer.invoke("image:paste", { bytes, type }),
   request: (opts) => ipcRenderer.invoke("net:request", opts),
   startChat: (opts) => ipcRenderer.invoke("chat:start", opts),
   stopChat: (streamId) => ipcRenderer.invoke("chat:stop", streamId),

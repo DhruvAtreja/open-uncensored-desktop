@@ -1,9 +1,11 @@
 // Electron main process: the window, the API key (a user-only file in the data folder), saved
 // conversations, and the coding agent, which is the open source Codex CLI pointed at the
 // OpenUncensored API (it speaks the Responses API, which the router serves at /v1/responses).
-const { app, BrowserWindow, Menu, dialog, ipcMain, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeImage, safeStorage, shell } = require("electron");
 const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline");
 const updater = require("./updater.cjs");
@@ -413,6 +415,30 @@ function createWindow() {
     }
   });
   ipcMain.handle("image:open", (_e, file) => isImage(file) && fs.existsSync(file) && shell.openPath(file));
+  // An image pasted into the message box: saved to a temp folder, and its path goes in the message
+  // (<image_attached>path</image_attached>) for the agent to open. PNG, JPEG and WebP are kept as
+  // they are; anything else the clipboard holds (TIFF, BMP, GIF) is converted to PNG.
+  ipcMain.handle("image:paste", (_e, { bytes, type }) => {
+    try {
+      let buf = Buffer.from(bytes);
+      if (!buf.length || buf.length > 20 * 1024 * 1024) return null;
+      let ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[type];
+      if (!ext) {
+        const img = nativeImage.createFromBuffer(buf);
+        if (img.isEmpty()) return null;
+        buf = img.toPNG();
+        ext = "png";
+      }
+      const dir = path.join(os.tmpdir(), "OpenUncensored", "pasted");
+      fs.mkdirSync(dir, { recursive: true });
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      const file = path.join(dir, `pasted-${stamp}-${crypto.randomBytes(3).toString("hex")}.${ext}`);
+      fs.writeFileSync(file, buf);
+      return file;
+    } catch {
+      return null;
+    }
+  });
   ipcMain.handle("net:request", (_e, opts) => request(opts));
   ipcMain.handle("chat:start", (_e, opts) => {
     chatStream(win, opts);

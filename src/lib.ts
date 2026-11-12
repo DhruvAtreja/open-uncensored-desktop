@@ -66,6 +66,7 @@ declare global {
       openUrl(url: string): Promise<void>;
       readImage(file: string): Promise<string | null>;
       openImage(file: string): Promise<void>;
+      pasteImage(bytes: ArrayBuffer, type: string): Promise<string | null>;
       request(opts: { url: string; method?: string; body?: unknown; auth?: boolean; claim?: string }): Promise<{ status: number; json: unknown }>;
       startChat(opts: { streamId: string; model: string; messages: { role: string; content: string }[] }): Promise<boolean>;
       stopChat(streamId: string): Promise<boolean>;
@@ -82,6 +83,16 @@ declare global {
 }
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+
+// Pasted images travel in the message text as <image_attached>path</image_attached>, after what the user
+// typed, so the agent (and a branch's agent, which gets the text) knows where the file is.
+const ATTACHED = /\n*<image_attached>([^<]+)<\/image_attached>/g;
+export const withImages = (text: string, files: string[]) =>
+  [text, ...files.map((f) => `<image_attached>${f}</image_attached>`)].filter(Boolean).join("\n\n");
+export function splitImages(text: string): { text: string; files: string[] } {
+  const files = [...text.matchAll(ATTACHED)].map((m) => m[1].trim());
+  return { text: text.replace(ATTACHED, "").trim(), files };
+}
 
 // Model output is untrusted: raw HTML in it is shown as text, never rendered.
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
