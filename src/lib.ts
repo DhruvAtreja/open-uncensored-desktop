@@ -3,7 +3,7 @@ import { marked } from "marked";
 // Shared types, the OpenUncensored API calls and safe markdown.
 
 export const SITE = "https://openuncensored.com";
-export const API = `${SITE}/api/v1`;
+export const API = "https://api.openuncensored.com/v1"; // straight to the router (no 120 s cut)
 
 export interface ModelInfo {
   id: string;

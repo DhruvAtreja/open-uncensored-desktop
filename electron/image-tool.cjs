@@ -12,7 +12,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
 
-const API = process.env.OU_API_BASE || "https://openuncensored.com/api/v1";
+const API = process.env.OU_API_BASE || "https://api.openuncensored.com/v1";
 const DEFAULT_MODEL = "z-image-turbo";
 const DEFAULT_EDIT_MODEL = "qwen-edit-uncensored"; // when reference images are given
 const MAX_REF_BYTES = 20 * 1024 * 1024;
@@ -93,7 +93,8 @@ async function api(pathname, init = {}) {
       ...(key ? { Authorization: `Bearer ${key}` } : {}),
       ...(init.headers || {}),
     },
-    signal: AbortSignal.timeout(180000),
+    // The router gives an image request up to 4 minutes on this host (Civitai edits can take 2); wait a bit longer.
+    signal: AbortSignal.timeout(250000),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body?.error?.message || `HTTP ${res.status}`);

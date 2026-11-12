@@ -22,7 +22,9 @@ app.setAboutPanelOptions({ applicationName: DISPLAY_NAME });
 const primary = app.requestSingleInstanceLock();
 if (!primary) app.quit();
 
-const API = "https://openuncensored.com/api/v1";
+// Straight to the router: openuncensored.com/api/v1 goes through the website, which ends a request that has
+// sent nothing for 120 s (long non-streamed answers, slow images). That URL still works for older versions.
+const API = "https://api.openuncensored.com/v1";
 const data = (...p) => path.join(app.getPath("userData"), ...p);
 
 // ---------------------------------------------------------------------------- key
@@ -268,7 +270,7 @@ async function startAgent(win, { runId, threadId, prompt, cwd, model }) {
 // All HTTP happens here, in the main process: no CORS limits, and the page never holds the key.
 
 async function request({ url, method = "GET", body, auth = true, claim }) {
-  if (!url.startsWith("https://openuncensored.com/")) return { status: 0, json: { error: "blocked" } };
+  if (![`${API}/`, "https://openuncensored.com/"].some((ok) => url.startsWith(ok))) return { status: 0, json: { error: "blocked" } };
   const key = readKey();
   const headers = { "Content-Type": "application/json", "X-Title": "OpenUncensored Desktop", "X-OU-Install": installId() };
   if (auth && key) headers.Authorization = `Bearer ${key}`;
