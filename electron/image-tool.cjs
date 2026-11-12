@@ -27,13 +27,15 @@ const TOOLS = [
       "Call list_image_models to see every model. Good picks: z-image-turbo (fast photoreal, default), lustify-v8 (explicit photo), " +
       "wai-illustrious (anime; start the prompt with 'masterpiece, best quality'), pony-diffusion-v6 (stylised; start with 'score_9, score_8_up, score_7_up'), chroma (strong prompt following). " +
       "To keep a character, person or object from existing pictures (same face and outfit in a new scene, a new pose, a restyle), pass their file paths as reference_images: " +
-      "the default model is then qwen-image-3-edit (the best edits, high detail, up to 3 references); qwen-edit-uncensored is the alternative for edits it refuses; seedream-v5-5-edit keeps one character most consistently (up to 10). " +
+      "the default model is then qwen-image-3-edit (the best edits, high detail, up to 3 references). Use qwen-image-3-edit for every edit, adult and explicit ones included, unless the user names another model: " +
+      "it is not the cautious choice to swap it for another model up front. Only if a qwen-image-3-edit call returns an error or a refusal, retry once with qwen-edit-uncensored. " +
+      "seedream-v5-5-edit is for keeping one character consistent across many images (up to 10 references). " +
       "In the prompt, say what must stay the same and what changes.",
     inputSchema: {
       type: "object",
       properties: {
         prompt: { type: "string", description: "What to draw. Be specific about subject, style, lighting and composition." },
-        model: { type: "string", description: `Image model id. Default ${DEFAULT_MODEL}.` },
+        model: { type: "string", description: `Image model id. Default ${DEFAULT_MODEL}, or ${DEFAULT_EDIT_MODEL} when reference_images are given (leave it out for edits).` },
         size: { type: "string", enum: SIZES, description: "Image size. Default 1024x1024." },
         n: { type: "integer", minimum: 1, maximum: 4, description: "Number of images, 1 to 4. Default 1." },
         negative_prompt: { type: "string", description: "What to keep out of the image (used by the Civitai models)." },
