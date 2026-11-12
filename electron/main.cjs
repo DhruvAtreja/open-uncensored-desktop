@@ -1,7 +1,7 @@
 // Electron main process: the window, the API key (a user-only file in the data folder), saved
 // conversations, and the coding agent, which is the open source Codex CLI pointed at the
 // OpenUncensored API (it speaks the Responses API, which the router serves at /v1/responses).
-const { app, BrowserWindow, Menu, dialog, ipcMain, nativeImage, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, safeStorage, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -17,6 +17,10 @@ const updater = require("./updater.cjs");
 const DISPLAY_NAME = "OpenUncensored";
 app.setName("Open Uncensored");
 app.setAboutPanelOptions({ applicationName: DISPLAY_NAME });
+// One running copy: opening the app again (Start menu, desktop shortcut, Dock) shows the one that is
+// running, which on Windows may be hidden in the tray.
+const primary = app.requestSingleInstanceLock();
+if (!primary) app.quit();
 
 const API = "https://openuncensored.com/api/v1";
 const data = (...p) => path.join(app.getPath("userData"), ...p);
@@ -334,6 +338,7 @@ async function chatStream(win, { streamId, model, messages }) {
 // ---------------------------------------------------------------------------- window
 
 let mainWindow = null;
+let quitting = false; // set once the app is really quitting, so the window may close
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -374,7 +379,55 @@ function createWindow() {
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
   });
+  if (IS_WIN) {
+    win.on("close", (e) => {
+      if (quitting) return;
+      e.preventDefault();
+      win.hide();
+      trayHint();
+    });
+    // Signing out or shutting down must not be held up by the window refusing to close.
+    win.on("query-session-end", () => (quitting = true));
+    win.on("session-end", () => (quitting = true));
+  }
   return win;
+}
+
+// Bring the window back: from the tray, the Dock, or a second launch.
+function showWindow() {
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+// Windows: closing the window hides it and the app keeps running in the tray (by the clock), like
+// Slack or Claude, so agent tasks keep going. Click the icon to open it; right-click to quit.
+let tray = null;
+function createTray() {
+  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, "tray.png"))); // tray@2x.png on high-DPI screens
+  tray.setToolTip(DISPLAY_NAME);
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: `Open ${DISPLAY_NAME}`, click: showWindow },
+      { type: "separator" },
+      { label: `Quit ${DISPLAY_NAME}`, click: () => app.quit() },
+    ]),
+  );
+  tray.on("click", showWindow);
+}
+// The first time the window is closed, say where the app went.
+function trayHint() {
+  const flag = data("tray-hint-shown");
+  if (!tray || fs.existsSync(flag)) return;
+  try {
+    fs.writeFileSync(flag, "");
+  } catch {}
+  tray.displayBalloon({
+    iconType: "info",
+    title: `${DISPLAY_NAME} is still running`,
+    content: "It is in the tray by the clock. Click the icon to open it, or right-click it to quit.",
+  });
 }
 
 // The window that sent an IPC message (a closed window is reopened from the Dock as a new one, so
@@ -509,9 +562,12 @@ function setMenu() {
   );
 }
 
+app.on("second-instance", () => app.isReady() && showWindow());
 app.whenReady().then(() => {
+  if (!primary) return; // another copy is running; this one quits
   setMenu();
   registerIpc();
+  if (IS_WIN) createTray();
   createWindow();
   installId();
   if (freshInstall) appEvent("app_install");
@@ -519,13 +575,15 @@ app.whenReady().then(() => {
   updater.start();
 });
 // Agent tasks and chat streams report to the window that started them, so they stop when it closes
-// (the conversation keeps what was done; sending again carries on) and when the app quits.
+// (Mac; the conversation keeps what was done, and sending again carries on) and when the app quits.
+// On Windows the window only hides, so they keep running in the tray.
 function stopWork() {
   for (const child of runs.values()) child.kill("SIGINT");
   for (const ctrl of streams.values()) ctrl.abort();
 }
 // Mac: closing the window leaves the app running in the Dock, like other Mac apps; clicking the
-// Dock icon opens a new window. Windows: closing the window quits.
+// Dock icon opens a new window. Windows: the window hides to the tray instead of closing (above), so
+// this runs only while quitting.
 app.on("window-all-closed", () => {
   stopWork();
   if (process.platform !== "darwin") app.quit();
@@ -533,4 +591,7 @@ app.on("window-all-closed", () => {
 app.on("activate", () => {
   if (app.isReady() && BrowserWindow.getAllWindows().length === 0) createWindow();
 });
-app.on("before-quit", stopWork);
+app.on("before-quit", () => {
+  quitting = true;
+  stopWork();
+});

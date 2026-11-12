@@ -1,7 +1,8 @@
 // End-to-end test of the installed Windows app with a real key (run by .github/workflows/windows.yml
 // when started with e2e=true). Drives the UI like a user: new conversation, ask the agent for an
 // image, then for a Python program it must write and run; checks the files on disk, the inline image,
-// the output in the chat, that the conversation is saved, and that the page logged no errors.
+// the output in the chat, that the conversation is saved, that closing the window hides it to the
+// tray and a second launch shows it, and that the page logged no errors.
 const { _electron } = require("playwright");
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
@@ -138,6 +139,28 @@ async function runTask(win, label, prompt, timeoutMs) {
   for (const f of fs.readdirSync(folder)) {
     if (/\.(png|jpe?g|webp|py)$/i.test(f)) fs.copyFileSync(path.join(folder, f), path.join(out, `made-${f}`));
   }
+
+  // Tray: closing the window hides it and the app keeps running; launching the app again brings that
+  // window back instead of starting a second copy. (app.close() below must still really quit.)
+  const windows = () =>
+    app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => ({ visible: w.isVisible(), destroyed: w.isDestroyed() })));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+  await win.waitForTimeout(1500);
+  const hidden = await windows();
+  check("closing the window hides it to the tray, app still running", hidden.length === 1 && !hidden[0].visible, JSON.stringify(hidden));
+  await win.screenshot({ path: path.join(out, "07-hidden.png") }).catch(() => {});
+  const second = require("node:child_process").spawn(exe, [], { detached: true, stdio: "ignore" });
+  second.unref();
+  await win.waitForTimeout(8000);
+  const shown = await windows();
+  check("opening the app again shows the same window", shown.length === 1 && shown[0].visible, JSON.stringify(shown));
+  let secondGone = false;
+  try {
+    process.kill(second.pid, 0);
+  } catch {
+    secondGone = true;
+  }
+  check("the second launch quit instead of running a second copy", secondGone, `pid ${second.pid}`);
   await app.close();
 
   // Relaunch: the conversation is still there.
