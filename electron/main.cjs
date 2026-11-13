@@ -1,7 +1,7 @@
 // Electron main process: the window, the API key (a user-only file in the data folder), saved
 // conversations, and the coding agent, which is the open source Codex CLI pointed at the
 // OpenUncensored API (it speaks the Responses API, which the router serves at /v1/responses).
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, clipboard, dialog, ipcMain, nativeImage, safeStorage, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -563,6 +563,12 @@ function registerIpc() {
   ipcMain.handle("key:set", (_e, key) => {
     writeKey(key);
     if (key) appEvent("app_key");
+  });
+  // Copies the stored key, so a buyer whose key arrived straight into the app can keep a copy.
+  ipcMain.handle("key:copy", () => {
+    const key = readKey();
+    if (key) clipboard.writeText(key);
+    return Boolean(key);
   });
   ipcMain.handle("conversations:get", () => readConversations());
   ipcMain.handle("conversations:set", (_e, list) => writeConversations(list));

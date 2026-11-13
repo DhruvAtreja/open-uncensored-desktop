@@ -110,6 +110,7 @@ declare global {
       platform: string;
       getKey(): Promise<string | null>;
       setKey(key: string | null): Promise<void>;
+      copyKey(): Promise<boolean>;
       getConversations(): Promise<Conversation[]>;
       setConversations(list: Conversation[]): Promise<void>;
       pickFolder(): Promise<string | null>;

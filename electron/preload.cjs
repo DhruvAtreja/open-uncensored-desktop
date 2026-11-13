@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("ou", {
   platform: process.platform, // "darwin" or "win32": the page lays out the title bar to match
   getKey: () => ipcRenderer.invoke("key:get"),
   setKey: (key) => ipcRenderer.invoke("key:set", key),
+  copyKey: () => ipcRenderer.invoke("key:copy"),
   getConversations: () => ipcRenderer.invoke("conversations:get"),
   setConversations: (list) => ipcRenderer.invoke("conversations:set", list),
   pickFolder: () => ipcRenderer.invoke("folder:pick"),

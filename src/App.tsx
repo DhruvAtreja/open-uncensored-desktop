@@ -50,6 +50,8 @@ const topModel = (models: ModelInfo[]) =>
     ? DEFAULT_MODEL
     : (models.find((m) => m.rank === 1)?.id ?? DEFAULT_MODEL);
 const PACKS = [1000, 2500, 5000];
+// Emails a new key with the same credits to the address a purchase was paid with.
+const RECOVER_URL = "https://openuncensored.com/credits/recover";
 const DEFAULT_TITLE = "New conversation";
 
 const folderName = (p?: string) => (p ? p.split("/").filter(Boolean).pop() ?? p : "");
@@ -1303,6 +1305,12 @@ function KeySetup({ onKey }: { onKey: (k: string) => void }) {
                 Continue
               </button>
             </div>
+            <button
+              onClick={() => window.ou.openUrl(RECOVER_URL)}
+              className="mt-3 block text-left text-[12px] text-fg-3 underline decoration-white/20 underline-offset-4 transition-colors hover:text-fg hover:decoration-white/60"
+            >
+              Lost your key? Get a new one by email, with the same credits
+            </button>
           </div>
         </div>
       </div>
@@ -1323,11 +1331,26 @@ function Settings({
   onRefresh: () => void;
   onSignOut: () => void;
 }) {
+  // The key lives only on this computer and, when bought in the app, was never shown: removing it
+  // without a copy loses the credits on it. So removal asks first and offers a copy.
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    if (await window.ou.copyKey()) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }
+  };
   useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (confirmRemove) setConfirmRemove(false);
+      else onClose();
+    };
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
-  }, [onClose]);
+  }, [onClose, confirmRemove]);
+  const device = WIN ? "PC" : "Mac";
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-[2px]" onClick={onClose}>
       <div className="w-full max-w-[420px] rounded-2xl border border-white/10 bg-ink-2 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -1340,14 +1363,53 @@ function Settings({
         <div className="mt-5 rounded-xl bg-white/[0.03] p-4">
           <p className="text-[12px] text-fg-3">Balance</p>
           <p className="mt-0.5 text-[28px] font-semibold tabular-nums tracking-tight">{typeof credit === "number" ? `$${credit.toFixed(2)}` : "–"}</p>
-          <p className="mt-1 text-[11.5px] text-fg-3">Key ending …{apiKey.slice(-4)}, stored only on this computer</p>
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <p className="text-[11.5px] text-fg-3">Key ending …{apiKey.slice(-4)}, stored only on this computer</p>
+            <button
+              onClick={copy}
+              className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[11.5px] text-fg-2 transition-colors hover:border-white/25 hover:text-fg"
+            >
+              {copied ? "Copied" : "Copy key"}
+            </button>
+          </div>
         </div>
         <p className="mb-2.5 mt-5 text-[13px] font-medium">Add credit</p>
         <Purchase topUpKey={apiKey} onDone={onRefresh} />
+        {confirmRemove ? (
+          <div className="mt-6 rounded-xl border border-bad/30 bg-bad/[0.06] p-4">
+            <p className="text-[13px] font-medium">Remove your key from this {device}?</p>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-fg-2">
+              This is the only copy of your key
+              {typeof credit === "number" && credit > 0 ? `, and it holds $${credit.toFixed(2)} of credit` : ""}. Copy it
+              first to use it again later. Without it you have to get a new key by email.
+            </p>
+            <div className="mt-3.5 flex flex-wrap gap-2">
+              <button onClick={copy} className="rounded-lg bg-fg px-3 py-1.5 text-[12px] font-medium text-ink">
+                {copied ? "Copied" : "Copy key"}
+              </button>
+              <button
+                onClick={onSignOut}
+                className="rounded-lg border border-bad/40 px-3 py-1.5 text-[12px] text-bad transition-colors hover:bg-bad/10"
+              >
+                Remove
+              </button>
+              <button
+                onClick={() => setConfirmRemove(false)}
+                className="rounded-lg px-3 py-1.5 text-[12px] text-fg-3 transition-colors hover:text-fg"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
         <div className="mt-6 flex items-center justify-between border-t border-white/[0.06] pt-4">
-          <button onClick={onSignOut} className="text-[12px] text-fg-3 transition-colors hover:text-bad">
-            Remove key from this {WIN ? "PC" : "Mac"}
-          </button>
+          {confirmRemove ? (
+            <span />
+          ) : (
+            <button onClick={() => setConfirmRemove(true)} className="text-[12px] text-fg-3 transition-colors hover:text-bad">
+              Remove key from this {device}
+            </button>
+          )}
           <UpdateLine />
         </div>
       </div>
