@@ -91,7 +91,9 @@ export function ModelPicker({ value, models, onChange }: { value: string; models
             {ranked.map((m, i) => row(m, i))}
             {others.length > 0 && <p className="px-2.5 pb-1 pt-3 text-[10.5px] font-medium uppercase tracking-wider text-fg-3">More models</p>}
             {others.map((m, i) => row(m, ranked.length + i))}
-            {flat.length === 0 && <p className="px-3 py-6 text-center text-[12.5px] text-fg-3">No model matches “{query}”.</p>}
+            {flat.length === 0 && (
+              <p className="px-3 py-6 text-center text-[12.5px] text-fg-3">{models.length === 0 ? "Loading models…" : `No model matches “${query}”.`}</p>
+            )}
           </div>
         </div>
       )}

@@ -108,6 +108,31 @@ function appEvent(event, props = {}) {
   }).catch(() => {});
 }
 
+// ---------------------------------------------------------------------------- model list cache
+// The last model list that loaded, kept on disk so the picker is never empty when the API cannot be
+// reached at launch (on 2026-11-18 the app opened during a ~40 s API deploy and stayed blank). A file
+// written by the main process, not localStorage, which Chromium flushes lazily and loses on a crash.
+const MODELS_CACHE = "models-cache.json";
+
+function readModelsCache() {
+  try {
+    const list = JSON.parse(fs.readFileSync(data(MODELS_CACHE), "utf8"));
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeModelsCache(list) {
+  if (!Array.isArray(list) || list.length === 0) return;
+  try {
+    fs.writeFileSync(data(`${MODELS_CACHE}.tmp`), JSON.stringify(list));
+    fs.renameSync(data(`${MODELS_CACHE}.tmp`), data(MODELS_CACHE));
+  } catch {
+    /* the next successful load writes it again */
+  }
+}
+
 // ---------------------------------------------------------------------------- conversations
 
 // Every chat lives in conversations.json. Up to 0.1.25 it was rewritten in place on every agent event,
@@ -386,8 +411,13 @@ async function startAgent(win, { runId, threadId, prompt, cwd, model }) {
 // ---------------------------------------------------------------------------- network
 // All HTTP happens here, in the main process: no CORS limits, and the page never holds the key.
 
+// Dev builds only: OU_DEV_OUTAGE_SECONDS=N makes every request fail for the first N seconds after launch,
+// like the ~40 s an API deploy takes, to test that the app recovers on its own.
+const DEV_OUTAGE_UNTIL = !app.isPackaged && process.env.OU_DEV_OUTAGE_SECONDS ? Date.now() + 1000 * Number(process.env.OU_DEV_OUTAGE_SECONDS) : 0;
+
 async function request({ url, method = "GET", body, auth = true, claim }) {
   if (![`${API}/`, "https://openuncensored.com/"].some((ok) => url.startsWith(ok))) return { status: 0, json: { error: "blocked" } };
+  if (Date.now() < DEV_OUTAGE_UNTIL) return { status: 0, json: { error: { message: "simulated outage" } } };
   const key = readKey();
   const headers = { "Content-Type": "application/json", "X-Title": "OpenUncensored Desktop", "X-OU-Install": installId() };
   if (auth && key) headers.Authorization = `Bearer ${key}`;
@@ -570,6 +600,8 @@ function registerIpc() {
     if (key) clipboard.writeText(key);
     return Boolean(key);
   });
+  ipcMain.handle("models:cache:get", () => readModelsCache());
+  ipcMain.handle("models:cache:set", (_e, list) => writeModelsCache(list));
   ipcMain.handle("conversations:get", () => readConversations());
   ipcMain.handle("conversations:set", (_e, list) => writeConversations(list));
   ipcMain.handle("folder:pick", async (e) => {

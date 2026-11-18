@@ -23,6 +23,8 @@ import {
   uid,
   type UpdateState,
   withAttachments,
+  cachedModels,
+  saveModels,
 } from "./lib";
 
 // A new conversation's title before the model names it: what the user typed, else what they attached.
@@ -110,7 +112,34 @@ export default function App() {
     window.ou.getConversations().then((list) =>
       setConvos(list.filter((c) => c.kind === "agent" && (c.turns.length > 0 || c.named || c.pinned)).map((c) => ({ ...c, turns: settleRunning(c.turns) }))),
     );
-    fetchModels().then(setModels).catch(() => setModels([]));
+  }, []);
+
+  // Load the model list, retrying with backoff (2 s doubling to 60 s) until the API answers. The cached
+  // list stays on screen meanwhile.
+  useEffect(() => {
+    let stopped = false;
+    let fresh = false;
+    let delay = 2000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    cachedModels().then((list) => !stopped && !fresh && list.length > 0 && setModels(list));
+    const load = () =>
+      fetchModels()
+        .then((list) => {
+          if (stopped) return;
+          fresh = true;
+          setModels(list);
+          saveModels(list);
+        })
+        .catch(() => {
+          if (stopped) return;
+          timer = setTimeout(load, delay);
+          delay = Math.min(delay * 2, 60000);
+        });
+    load();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
   }, []);
 
   // Empty chats the user did not pick a model for move to the default (topModel), e.g. ones opened on
@@ -126,8 +155,24 @@ export default function App() {
     });
   }, [models]);
 
+  // The balance keeps its last known value when a check fails, and failed checks retry for about two
+  // minutes (2, 4, 8, 16, 32, 60 s), long enough to ride out an API restart. A newer refresh replaces
+  // an older one's retries.
+  const creditRun = useRef(0);
   const refreshCredit = useCallback(() => {
-    if (key) balance().then(setCredit);
+    if (!key) return;
+    const run = ++creditRun.current;
+    let delay = 2000;
+    const load = () =>
+      balance().then((usd) => {
+        if (run !== creditRun.current) return;
+        if (usd !== null) setCredit(usd);
+        else if (delay <= 60000) {
+          setTimeout(load, delay);
+          delay *= 2;
+        }
+      });
+    load();
   }, [key]);
   useEffect(refreshCredit, [refreshCredit]);
 

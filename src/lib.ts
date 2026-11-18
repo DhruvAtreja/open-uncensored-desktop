@@ -111,6 +111,8 @@ declare global {
       getKey(): Promise<string | null>;
       setKey(key: string | null): Promise<void>;
       copyKey(): Promise<boolean>;
+      getModelsCache(): Promise<ModelInfo[]>;
+      setModelsCache(list: ModelInfo[]): Promise<void>;
       getConversations(): Promise<Conversation[]>;
       setConversations(list: Conversation[]): Promise<void>;
       pickFolder(): Promise<string | null>;
@@ -169,8 +171,18 @@ export const md = (text: string) => marked.parse(text, { async: false }) as stri
 
 const get = async (url: string, auth = false) => (await window.ou.request({ url, auth })).json as Record<string, unknown>;
 
+// The model list is cached on disk (main process) so the picker is never empty: on 2026-11-18 the app
+// opened while the API was restarting for a deploy (about 40 s), its one request failed, and models and
+// balance stayed blank until the app was relaunched. Now the cached list shows at once, and App retries
+// until a fresh one loads.
+export const cachedModels = (): Promise<ModelInfo[]> => window.ou.getModelsCache().catch(() => []);
+export const saveModels = (list: ModelInfo[]) => window.ou.setModelsCache(list).catch(() => {});
+
+// Throws when the API does not answer, so the caller can retry. The rankings (from the website) only
+// add scores and ranks: without them the models still load, unranked.
 export async function fetchModels(): Promise<ModelInfo[]> {
-  const [rankings, catalog] = await Promise.all([get(`${SITE}/api/rankings.json`), get(`${API}/models`)]);
+  const [rankings, catalog] = await Promise.all([get(`${SITE}/api/rankings.json`).catch(() => ({}) as Record<string, unknown>), get(`${API}/models`)]);
+  if (!Array.isArray(catalog.data) || catalog.data.length === 0) throw new Error("model list unavailable");
   const scores = new Map<string, Record<string, unknown>>(
     ((rankings.models as Record<string, unknown>[]) ?? []).map((m) => [m.id as string, m]),
   );

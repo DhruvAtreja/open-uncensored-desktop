@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld("ou", {
   getKey: () => ipcRenderer.invoke("key:get"),
   setKey: (key) => ipcRenderer.invoke("key:set", key),
   copyKey: () => ipcRenderer.invoke("key:copy"),
+  getModelsCache: () => ipcRenderer.invoke("models:cache:get"),
+  setModelsCache: (list) => ipcRenderer.invoke("models:cache:set", list),
   getConversations: () => ipcRenderer.invoke("conversations:get"),
   setConversations: (list) => ipcRenderer.invoke("conversations:set", list),
   pickFolder: () => ipcRenderer.invoke("folder:pick"),
