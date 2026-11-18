@@ -1,0 +1,94 @@
+# Checks the published Windows install paths the way a new user meets them, on clean runners:
+#  1. the website's "Download for Windows" link: download, checksum, signature, Windows Defender scan,
+#     silent install, first launch with no data and no key;
+#  2. the PowerShell one-liner from the download page, in Windows PowerShell 5.1 (what the Start menu
+#     opens), which installs and opens the app.
+# Each run reports one app_install + app_launch per job from the US (GitHub's runners): leave those
+# out of install counts (match by run time).
+name: Install check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download-link:
+    runs-on: windows-latest
+    steps:
+      - name: Download from the website link
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ProgressPreference = "SilentlyContinue"
+          $out = Join-Path $env:RUNNER_TEMP "OpenUncensored-Setup.exe"
+          $t = Measure-Command { Invoke-WebRequest "https://openuncensored.com/download/windows" -OutFile $out -UseBasicParsing }
+          $hash = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
+          Write-Host "downloaded $([math]::Round((Get-Item $out).Length / 1MB)) MB in $([math]::Round($t.TotalSeconds)) s, sha256 $hash"
+          $rel = gh api repos/${{ github.repository }}/releases/latest | ConvertFrom-Json
+          $asset = $rel.assets | Where-Object { $_.name -match "-win-x64\.exe$" } | Select-Object -First 1
+          Write-Host "latest release $($rel.tag_name): $($asset.name) $($asset.digest)"
+          if ($asset.digest -and "sha256:$hash" -ne $asset.digest) { throw "the website link serves a different file than the latest release" }
+          "SETUP=$out" | Out-File $env:GITHUB_ENV -Append
+      - name: Signature and Windows Defender verdict
+        shell: pwsh
+        run: |
+          Get-AuthenticodeSignature $env:SETUP | Format-List Status, StatusMessage
+          Update-MpSignature -ErrorAction SilentlyContinue
+          $s = Get-MpComputerStatus
+          Write-Host "Defender signatures $($s.AntivirusSignatureVersion) from $($s.AntivirusSignatureLastUpdated), real-time $($s.RealTimeProtectionEnabled)"
+          & "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" -Scan -ScanType 3 -File $env:SETUP -DisableRemediation
+          $code = $LASTEXITCODE
+          Get-MpThreatDetection -ErrorAction SilentlyContinue | Format-List
+          Write-Host "Defender scan exit code $code (0 = no threat, 2 = threat found)"
+          if ($code -eq 2) { throw "Windows Defender flags the installer" }
+      - name: Install silently and open it as a new user
+        shell: pwsh
+        run: |
+          $t = Measure-Command { Start-Process $env:SETUP -ArgumentList "/S" -Wait }
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "OpenUncensored.exe" | Select-Object -First 1
+          if (-not $exe) { throw "the installer finished but the app is not installed" }
+          Write-Host "installed in $([math]::Round($t.TotalSeconds)) s at $($exe.DirectoryName)"
+          $p = Start-Process $exe.FullName -PassThru
+          Start-Sleep -Seconds 30
+          if ($p.HasExited) { throw "the app quit on first launch (exit code $($p.ExitCode))" }
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$env:RUNNER_TEMP\first-launch.png")
+          $data = Join-Path $env:APPDATA "Open Uncensored"
+          Write-Host "running after 30 s (pid $($p.Id)); data folder: $(if (Test-Path $data) { (Get-ChildItem $data -Name) -join ', ' } else { 'missing' })"
+          Get-Process OpenUncensored -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, MainWindowTitle
+          Stop-Process -Name OpenUncensored -Force -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: download-link
+          path: ${{ runner.temp }}/first-launch.png
+          if-no-files-found: warn
+
+  powershell-one-liner:
+    runs-on: windows-latest
+    steps:
+      - name: Run the one-liner in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          Write-Host "PowerShell $($PSVersionTable.PSVersion)"
+          $t = Measure-Command { irm https://openuncensored.com/install.ps1 | iex }
+          Write-Host "one-liner took $([math]::Round($t.TotalSeconds)) s"
+          Start-Sleep -Seconds 30
+          $p = Get-Process OpenUncensored -ErrorAction SilentlyContinue
+          if (-not $p) { throw "the app is not running 30 s after the one-liner" }
+          Write-Host "app running: $($p.Count) processes"
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$env:RUNNER_TEMP\one-liner.png")
+          Stop-Process -Name OpenUncensored -Force -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: powershell-one-liner
+          path: ${{ runner.temp }}/one-liner.png
+          if-no-files-found: warn
