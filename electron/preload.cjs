@@ -45,7 +45,7 @@ contextBridge.exposeInMainWorld("ou", {
     return () => ipcRenderer.removeListener("update:state", listener);
   },
   copyText: (text) => ipcRenderer.invoke("text:copy", text),
-  shareApp: () => ipcRenderer.invoke("share:app"),
+  shareApp: (how) => ipcRenderer.invoke("share:app", how),
   logShare: (what) => ipcRenderer.invoke("share:log", what),
   startAgent: (opts) => ipcRenderer.invoke("agent:start", opts),
   stopAgent: (runId) => ipcRenderer.invoke("agent:stop", runId),

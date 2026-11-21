@@ -639,11 +639,12 @@ function registerIpc() {
   ipcMain.handle("share:log", (_e, what) => {
     if (what === "conversation") appEvent("app_share", { what });
   });
-  ipcMain.handle("share:app", (e) => {
+  // how: "sheet" (the macOS share sheet; Windows has none and copies instead) or "copy" (the clipboard).
+  ipcMain.handle("share:app", (e, how) => {
     const url = "https://openuncensored.com/?utm_source=desktop-share";
-    appEvent("app_share", { what: "app" });
+    appEvent("app_share", { what: "app", how: how === "copy" ? "copy" : "sheet" });
     const win = senderWindow(e);
-    if (process.platform === "darwin" && ShareMenu && win) {
+    if (how !== "copy" && process.platform === "darwin" && ShareMenu && win) {
       new ShareMenu({ texts: ["OpenUncensored: uncensored AI models in one app"], urls: [url] }).popup({ browserWindow: win });
       return "menu";
     }

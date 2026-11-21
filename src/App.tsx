@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Pencil, Pin, Plus, Share, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
+import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Link, Pencil, Pin, Plus, Share, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
 import {
   agentError,
   type AgentItem,
@@ -546,9 +546,8 @@ function Feedback({ model, onClose }: { model?: string; onClose: () => void }) {
 function ShareButton({ convo, onConversation }: { convo: Conversation; onConversation: () => void }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const shareApp = async () => {
-    const how = await window.ou.shareApp();
-    if (how === "copied") {
+  const shareApp = async (how: "sheet" | "copy") => {
+    if ((await window.ou.shareApp(how)) === "copied") {
       setCopied(true);
       setTimeout(() => {
         setCopied(false);
@@ -585,11 +584,22 @@ function ShareButton({ convo, onConversation }: { convo: Conversation; onConvers
                 <span className="block text-[11px] text-fg-3">{convo.shared ? "Your public link" : "Get a read-only link"}</span>
               </span>
             </button>
-            <button className={item} onClick={() => void shareApp()}>
-              {copied ? <Check className="h-4 w-4 shrink-0 text-ok" /> : <Share className="h-4 w-4 shrink-0 text-fg-3" />}
+            <div className="mx-2.5 my-1.5 border-t border-white/[0.06]" />
+            <p className="px-2.5 pb-1 pt-0.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-fg-3">Share the app</p>
+            {!WIN && (
+              <button className={item} onClick={() => void shareApp("sheet")}>
+                <Share className="h-4 w-4 shrink-0 text-fg-3" />
+                <span>
+                  Share OpenUncensored
+                  <span className="block text-[11px] text-fg-3">Messages, Mail, AirDrop and more</span>
+                </span>
+              </button>
+            )}
+            <button className={item} onClick={() => void shareApp("copy")}>
+              {copied ? <Check className="h-4 w-4 shrink-0 text-ok" /> : <Link className="h-4 w-4 shrink-0 text-fg-3" />}
               <span>
-                {copied ? "Link copied" : "Share OpenUncensored"}
-                <span className="block text-[11px] text-fg-3">{copied ? "Paste it anywhere" : "Tell a friend about the app"}</span>
+                {copied ? "Link copied" : "Copy link"}
+                <span className="block text-[11px] text-fg-3">{copied ? "Paste it anywhere" : "openuncensored.com"}</span>
               </span>
             </button>
           </div>

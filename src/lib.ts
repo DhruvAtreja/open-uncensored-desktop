@@ -138,7 +138,7 @@ declare global {
       installUpdate(): Promise<boolean>;
       onUpdate(fn: (s: UpdateState) => void): () => void;
       copyText(text: string): Promise<boolean>;
-      shareApp(): Promise<"menu" | "copied">;
+      shareApp(how: "sheet" | "copy"): Promise<"menu" | "copied">;
       logShare(what: "conversation"): Promise<void>;
     };
   }

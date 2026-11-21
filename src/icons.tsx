@@ -6,6 +6,7 @@ const base = (path: React.ReactNode, { className = "h-4 w-4" }: P, view = "0 0 2
   </svg>
 );
 export const Plus = (p: P) => base(<path d="M12 5v14M5 12h14" />, p);
+export const Link = (p: P) => base(<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />, p);
 export const Share = (p: P) => base(<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M6 12.5v6A1.5 1.5 0 0 0 7.5 20h9a1.5 1.5 0 0 0 1.5-1.5v-6" />, p);
 export const Folder = (p: P) => base(<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />, p);
 export const Trash = (p: P) => base(<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M9 7V4h6v3" />, p);
