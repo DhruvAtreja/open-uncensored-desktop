@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Pencil, Pin, Plus, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
+import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Pencil, Pin, Plus, Share, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
 import {
   agentError,
   type AgentItem,
@@ -25,6 +25,8 @@ import {
   withAttachments,
   cachedModels,
   saveModels,
+  createShare,
+  deleteShare,
 } from "./lib";
 
 // A new conversation's title before the model names it: what the user typed, else what they attached.
@@ -539,6 +541,162 @@ function Feedback({ model, onClose }: { model?: string; onClose: () => void }) {
   );
 }
 
+// The Share button in a conversation's header: share this conversation (a public read-only link) or
+// share the app itself (the macOS share sheet, or a copied link on Windows).
+function ShareButton({ convo, onConversation }: { convo: Conversation; onConversation: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const shareApp = async () => {
+    const how = await window.ou.shareApp();
+    if (how === "copied") {
+      setCopied(true);
+      setTimeout(() => {
+        setCopied(false);
+        setOpen(false);
+      }, 1600);
+    } else setOpen(false);
+  };
+  const item = "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] transition-colors hover:bg-white/[0.06] disabled:opacity-40 disabled:hover:bg-transparent";
+  return (
+    <div className="no-drag relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Share"
+        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-fg-2 transition-colors hover:bg-white/[0.06] hover:text-fg"
+      >
+        <Share className="h-3.5 w-3.5" />
+        Share
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full z-30 mt-1.5 w-[248px] rounded-xl border border-white/10 bg-ink-2 p-1.5 shadow-2xl">
+            <button
+              className={item}
+              disabled={convo.turns.length === 0}
+              onClick={() => {
+                setOpen(false);
+                onConversation();
+              }}
+            >
+              <Chat className="h-4 w-4 shrink-0 text-fg-3" />
+              <span>
+                Share this conversation
+                <span className="block text-[11px] text-fg-3">{convo.shared ? "Your public link" : "Get a read-only link"}</span>
+              </span>
+            </button>
+            <button className={item} onClick={() => void shareApp()}>
+              {copied ? <Check className="h-4 w-4 shrink-0 text-ok" /> : <Share className="h-4 w-4 shrink-0 text-fg-3" />}
+              <span>
+                {copied ? "Link copied" : "Share OpenUncensored"}
+                <span className="block text-[11px] text-fg-3">{copied ? "Paste it anywhere" : "Tell a friend about the app"}</span>
+              </span>
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ShareDialog({ convo, update, onClose }: { convo: Conversation; update: Update; onClose: () => void }) {
+  const [state, setState] = useState<"idle" | "working">("idle");
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const shared = convo.shared;
+  const newer = shared ? convo.turns.length - shared.turns : 0;
+  useEffect(() => {
+    const keys = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", keys);
+    return () => window.removeEventListener("keydown", keys);
+  }, [onClose]);
+  const copy = async (url: string) => {
+    if (await window.ou.copyText(url)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    }
+  };
+  const run = async (fn: () => Promise<void>) => {
+    if (state === "working") return;
+    setState("working");
+    setError("");
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setState("idle");
+  };
+  // A new link replaces the old one (so it also takes in messages sent since), and is copied at once.
+  const publish = () =>
+    run(async () => {
+      const link = await createShare(convo);
+      if (shared) await deleteShare(shared.id).catch(() => {});
+      update(convo.id, (c) => ({ ...c, shared: { ...link, turns: c.turns.length } }));
+      void window.ou.logShare("conversation");
+      await copy(link.url);
+    });
+  const unpublish = () =>
+    run(async () => {
+      if (shared) await deleteShare(shared.id);
+      update(convo.id, (c) => ({ ...c, shared: undefined }));
+    });
+  return (
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-[2px]" onClick={onClose}>
+      <div className="w-full max-w-[460px] rounded-2xl border border-white/10 bg-ink-2 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-[16px] font-semibold">Share this conversation</h2>
+          <button onClick={onClose} className="rounded-md p-1 text-fg-3 hover:bg-white/[0.07] hover:text-fg">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mt-2 text-[12.5px] leading-relaxed text-fg-3">
+          Anyone with the link can read your messages and the replies, as text. Commands, files, images and the model&apos;s
+          reasoning stay on this computer.
+        </p>
+        {shared ? (
+          <>
+            <div className="mt-4 flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] py-1.5 pl-3 pr-1.5">
+              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-fg-2">{shared.url}</span>
+              <button onClick={() => void copy(shared.url)} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-fg px-3 py-1.5 text-[12px] font-medium text-ink hover:opacity-90">
+                {copied && <Check className="h-3.5 w-3.5" />}
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+            {newer > 0 && <p className="mt-2 text-[12px] text-fg-3">{newer} new {newer === 1 ? "message is" : "messages are"} not in the link yet.</p>}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button onClick={() => void window.ou.openUrl(shared.url)} className="rounded-xl border border-white/[0.1] px-3 py-1.5 text-[12.5px] text-fg-2 hover:text-fg">
+                Open
+              </button>
+              {newer > 0 && (
+                <button onClick={() => void publish()} className="rounded-xl border border-white/[0.1] px-3 py-1.5 text-[12.5px] text-fg-2 hover:text-fg">
+                  Update link
+                </button>
+              )}
+              <button onClick={() => void unpublish()} className="ml-auto rounded-xl px-3 py-1.5 text-[12.5px] text-bad hover:bg-white/[0.05]">
+                Delete link
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="mt-5 flex justify-end">
+            <button
+              onClick={() => void publish()}
+              disabled={state === "working"}
+              className="flex items-center gap-2 rounded-xl bg-fg px-4 py-2 text-[13px] font-medium text-ink transition-opacity hover:opacity-90 disabled:opacity-40"
+            >
+              {state === "working" && <Spinner />}
+              Create link
+            </button>
+          </div>
+        )}
+        {state === "working" && shared && <p className="mt-3 flex items-center gap-2 text-[12px] text-fg-3"><Spinner /> Working…</p>}
+        {error && <p className="mt-3 text-[12px] text-bad">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
 // Shown in the top bar when the sidebar is hidden: room for the window buttons, then a toggle.
 function SidebarToggle({ open, onOpen }: { open: boolean; onOpen: () => void }) {
   const [ready, setReady] = useState(false);
@@ -1035,6 +1193,7 @@ function AgentView({
 }) {
   const busy = runs.busy.has(convo.id);
   const [editingTitle, setEditingTitle] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [draft, setDraft] = useState(convo.draft ?? "");
   // A branch made with "Edit in a branch" opens with the message in the composer, once.
   useEffect(() => {
@@ -1075,11 +1234,13 @@ function AgentView({
             </button>
           )}
         </div>
+        <ShareButton convo={convo} onConversation={() => setSharing(true)} />
         <span title={convo.folder} className="no-drag flex max-w-[260px] items-center gap-1.5 rounded-md bg-white/[0.05] px-2 py-1 text-[11.5px] text-fg-2">
           <Folder className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate">{folderName(convo.folder)}</span>
         </span>
       </header>
+      {sharing && <ShareDialog convo={convo} update={update} onClose={() => setSharing(false)} />}
 
       <div ref={scroller} className="flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[760px] flex-col gap-6 px-6 py-8">

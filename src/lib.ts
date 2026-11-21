@@ -93,6 +93,7 @@ export interface Conversation {
   pinned?: boolean; // shown in the sidebar's Pinned section, above Recent
   branchedFrom?: { id: string; title: string }; // made with "Branch from here" / "Edit in a branch"
   draft?: string; // text to put in the composer when the conversation opens (an edited message)
+  shared?: { id: string; url: string; turns: number }; // its public link (Share), and how many turns it had then
   turns: Turn[];
   updated: number;
 }
@@ -136,6 +137,9 @@ declare global {
       checkForUpdate(): Promise<void>;
       installUpdate(): Promise<boolean>;
       onUpdate(fn: (s: UpdateState) => void): () => void;
+      copyText(text: string): Promise<boolean>;
+      shareApp(): Promise<"menu" | "copied">;
+      logShare(what: "conversation"): Promise<void>;
     };
   }
 }
@@ -264,6 +268,58 @@ export async function sendFeedback(f: {
   const err = (r.json as { error?: unknown }).error;
   const msg = typeof err === "string" ? err : (err as { message?: string } | undefined)?.message;
   return { ok: false, error: msg || (r.status ? `Could not send (error ${r.status}).` : "No connection. Try again.") };
+}
+
+// Sharing a conversation publishes a read-only copy at openuncensored.com/share/<id> (router /v1/shares):
+// the user's messages and the replies, as text. Commands, reasoning, files and images stay on this
+// computer, attachments and pictures are only counted, and home-folder paths in the text become ~.
+export type SharedMessage = { role: "user" | "assistant"; content: string };
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const hideHome = (s: string) => s.replace(/(\/Users\/|\/home\/|[A-Za-z]:\\Users\\)[^/\\\s]+/g, "~");
+export function shareMessages(convo: Conversation): SharedMessage[] {
+  const out: SharedMessage[] = [];
+  for (const t of convo.turns) {
+    const parts: string[] = [];
+    if (t.role === "user") {
+      const { text, attachments } = splitAttachments(t.text);
+      const images = attachments.filter((a) => a.image).length;
+      parts.push(text);
+      if (images) parts.push(`[${plural(images, "image")} attached]`);
+      if (attachments.length - images) parts.push(`[${plural(attachments.length - images, "file")} attached]`);
+    } else {
+      if (t.items?.length) {
+        for (const i of t.items) if (i.kind === "message") parts.push(i.text);
+        const made = t.items.reduce((n, i) => n + (i.kind === "image" ? i.files.length : 0), 0);
+        if (made) parts.push(`[${plural(made, "image")} made, not included]`);
+      } else parts.push(t.text);
+    }
+    const content = parts.filter((p) => p && p.trim()).join("\n\n");
+    if (content) out.push({ role: t.role, content: hideHome(content) });
+  }
+  return out;
+}
+
+const apiError = (r: { status: number; json: unknown }, what: string) => {
+  const err = (r.json as { error?: { message?: string } | string } | null)?.error;
+  const msg = typeof err === "string" ? err : err?.message;
+  return new Error(msg || (r.status ? `Could not ${what} (error ${r.status}).` : "No connection. Try again."));
+};
+
+export async function createShare(convo: Conversation): Promise<{ id: string; url: string }> {
+  const r = await window.ou.request({
+    url: `${API}/shares`,
+    method: "POST",
+    auth: true,
+    body: { title: convo.title, model: convo.model, messages: shareMessages(convo) },
+  });
+  const body = r.json as { id?: string; url?: string };
+  if (r.status !== 201 || !body?.id || !body.url) throw apiError(r, "share");
+  return { id: body.id, url: body.url };
+}
+
+export async function deleteShare(id: string): Promise<void> {
+  const r = await window.ou.request({ url: `${API}/shares/${id}`, method: "DELETE", auth: true });
+  if (r.status !== 200 && r.status !== 404) throw apiError(r, "delete the link"); // 404: already gone
 }
 
 // Buying credits without the website: a payment link for the human, then poll for the key.

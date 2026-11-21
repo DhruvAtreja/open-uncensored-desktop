@@ -1,7 +1,7 @@
 // Electron main process: the window, the API key (a user-only file in the data folder), saved
 // conversations, and the coding agent, which is the open source Codex CLI pointed at the
 // OpenUncensored API (it speaks the Responses API, which the router serves at /v1/responses).
-const { app, BrowserWindow, Menu, Tray, clipboard, dialog, ipcMain, nativeImage, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, Menu, ShareMenu, Tray, clipboard, dialog, ipcMain, nativeImage, safeStorage, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -629,6 +629,27 @@ function registerIpc() {
     return dir;
   });
   ipcMain.handle("open:url", (_e, url) => /^https:\/\//.test(url) && shell.openExternal(url));
+  // Share: a link to a shared conversation goes to the clipboard; the app itself goes to the macOS share
+  // sheet (Messages, Mail, AirDrop...) or, on Windows, to the clipboard. The utm tag counts what it brings.
+  ipcMain.handle("text:copy", (_e, text) => {
+    if (typeof text !== "string" || text.length > 10000) return false;
+    clipboard.writeText(text);
+    return true;
+  });
+  ipcMain.handle("share:log", (_e, what) => {
+    if (what === "conversation") appEvent("app_share", { what });
+  });
+  ipcMain.handle("share:app", (e) => {
+    const url = "https://openuncensored.com/?utm_source=desktop-share";
+    appEvent("app_share", { what: "app" });
+    const win = senderWindow(e);
+    if (process.platform === "darwin" && ShareMenu && win) {
+      new ShareMenu({ texts: ["OpenUncensored: uncensored AI models in one app"], urls: [url] }).popup({ browserWindow: win });
+      return "menu";
+    }
+    clipboard.writeText(url);
+    return "copied";
+  });
   // Pictures the image tool saved, shown inline in the chat and opened in the default image viewer on click.
   // Only image files, so the page cannot read or open anything else through these.
   const isImage = (p) => typeof p === "string" && path.isAbsolute(p) && /\.(png|jpe?g|webp)$/i.test(p);
