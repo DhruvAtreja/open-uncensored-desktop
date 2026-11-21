@@ -42,6 +42,9 @@ import { ModelPicker } from "./ModelPicker";
 const WIN = window.ou.platform === "win32";
 const MOD = WIN ? "Ctrl+" : "⌘";
 
+// How often the model list is fetched again while the app stays open (see the loading effect in App).
+const MODELS_REFRESH_MS = 10 * 60 * 1000;
+
 // New chats start on the #1 model in the rankings; this is only used until the list has loaded.
 // New conversations start on DeepSeek V4.1 Flash 1017 whatever the hourly ranking says (it and GLM 5.3
 // Flash trade #1 by a tenth of a point, and DeepSeek costs about a third as much per agent request).
@@ -115,30 +118,53 @@ export default function App() {
   }, []);
 
   // Load the model list, retrying with backoff (2 s doubling to 60 s) until the API answers. The cached
-  // list stays on screen meanwhile.
+  // list stays on screen meanwhile. After that it is refreshed every 10 minutes, and when the window comes
+  // back into focus (at most once a minute), so a model launched while the app is open shows up without a
+  // relaunch: on 2026-11-20 an app open since two days earlier never showed the new Inkling 2 Mini.
   useEffect(() => {
     let stopped = false;
     let fresh = false;
+    let loading = false;
+    let lastLoad = 0;
     let delay = 2000;
     let timer: ReturnType<typeof setTimeout> | undefined;
     cachedModels().then((list) => !stopped && !fresh && list.length > 0 && setModels(list));
-    const load = () =>
+    const schedule = (ms: number) => {
+      clearTimeout(timer);
+      timer = setTimeout(load, ms);
+    };
+    const load = () => {
+      if (loading) return;
+      loading = true;
       fetchModels()
         .then((list) => {
           if (stopped) return;
           fresh = true;
-          setModels(list);
+          lastLoad = Date.now();
+          delay = 2000;
+          // Same list: keep the old array so nothing re-renders.
+          setModels((prev) => (JSON.stringify(prev) === JSON.stringify(list) ? prev : list));
           saveModels(list);
+          schedule(MODELS_REFRESH_MS);
         })
         .catch(() => {
           if (stopped) return;
-          timer = setTimeout(load, delay);
+          schedule(delay);
           delay = Math.min(delay * 2, 60000);
+        })
+        .finally(() => {
+          loading = false;
         });
+    };
+    const onFocus = () => {
+      if (fresh && Date.now() - lastLoad > 60_000) load();
+    };
+    window.addEventListener("focus", onFocus);
     load();
     return () => {
       stopped = true;
       clearTimeout(timer);
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
 
