@@ -561,7 +561,7 @@ function ShareButton({ convo, onConversation }: { convo: Conversation; onConvers
       <button
         onClick={() => setOpen((o) => !o)}
         title="Share"
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-orange transition-colors hover:bg-white/[0.06]"
+        className="flex items-center gap-1.5 rounded-md bg-orange px-2.5 py-1 text-white transition-colors hover:bg-[#e2876a]"
       >
         <Share className="h-3.5 w-3.5" />
         {/* On the span: styles.css gives every button "font: inherit", which beats Tailwind's font utilities */}
