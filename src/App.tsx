@@ -561,7 +561,7 @@ function ShareButton({ convo, onConversation }: { convo: Conversation; onConvers
       <button
         onClick={() => setOpen((o) => !o)}
         title="Share"
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-fg-2 transition-colors hover:bg-white/[0.06] hover:text-fg"
+        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] font-medium text-orange transition-colors hover:bg-white/[0.06]"
       >
         <Share className="h-3.5 w-3.5" />
         Share
@@ -975,7 +975,7 @@ function Composer({
               onClick={send}
               disabled={!draft.trim() && !attached.length}
               title="Send (↵)"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fg text-ink transition-opacity hover:bg-white disabled:bg-transparent disabled:text-fg-3"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange text-white transition-colors hover:bg-[#e2876a] disabled:bg-transparent disabled:text-fg-3"
             >
               <ArrowUp className="h-4 w-4" />
             </button>
