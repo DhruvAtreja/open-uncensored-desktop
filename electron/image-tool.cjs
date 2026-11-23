@@ -155,9 +155,13 @@ async function generateImage(args) {
   if (!files.length) return text("The provider returned no image.", { isError: true });
   const cost = data.ou && typeof data.ou.cost_usd === "number" ? data.ou.cost_usd : null;
   const failed = data.ou && data.ou.images_failed ? ` ${data.ou.images_failed} more failed.` : "";
+  // The model that made it: when the one asked for refuses an edit on content grounds, the API makes it
+  // with an uncensored one instead and says so in ou.note (tell the user, so they know which model it was).
+  const used = (data.ou && typeof data.ou.model === "string" && data.ou.model) || model;
+  const note = data.ou && typeof data.ou.note === "string" ? `\n${data.ou.note}` : "";
   return text(
-    `Saved ${files.length} image${files.length > 1 ? "s" : ""} with ${model}${cost !== null ? ` (provider cost $${cost.toFixed(4)})` : ""}:\n${files.join("\n")}${failed}`,
-    { structuredContent: { files, model, cost_usd: cost } },
+    `Saved ${files.length} image${files.length > 1 ? "s" : ""} with ${used}${cost !== null ? ` (provider cost $${cost.toFixed(4)})` : ""}:\n${files.join("\n")}${failed}${note}`,
+    { structuredContent: { files, model: used, cost_usd: cost } },
   );
 }
 

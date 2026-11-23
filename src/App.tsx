@@ -968,7 +968,7 @@ function Composer({
           />
           {busy ? (
             <button onClick={onStop} title="Stop" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-fg transition-colors hover:bg-white/20">
-              <Square className="h-3.5 w-3.5" />
+              <Square className="h-6 w-6" />
             </button>
           ) : (
             <button
@@ -1176,11 +1176,11 @@ function useAgentRuns(update: Update, onSpent: () => void, convos: Conversation[
               // The image tool (electron/image-tool.cjs); other MCP tools are not configured.
               if (item.tool !== "generate_image") break;
               const args = (item.arguments ?? {}) as { prompt?: string; model?: string; reference_images?: string[] };
-              const result = (item.result ?? {}) as { content?: { type: string; text?: string }[]; structured_content?: { files?: string[] } };
+              const result = (item.result ?? {}) as { content?: { type: string; text?: string }[]; structured_content?: { files?: string[]; model?: string } };
               const files = result.structured_content?.files ?? [];
               const text = (result.content ?? []).map((c) => c.text ?? "").join("\n");
               const error = (item.error as { message?: string } | null)?.message ?? (item.status === "failed" || (!files.length && type === "item.completed") ? text || "Image generation failed." : "");
-              put({ kind: "image", id, prompt: String(args.prompt ?? ""), model: String(args.model ?? (Array.isArray(args.reference_images) && args.reference_images.length ? "qwen-image-3-edit" : "z-image-turbo")), files, error, running: type !== "item.completed" });
+              put({ kind: "image", id, prompt: String(args.prompt ?? ""), model: String(result.structured_content?.model ?? args.model ?? (Array.isArray(args.reference_images) && args.reference_images.length ? "qwen-image-3-edit" : "z-image-turbo")), files, error, running: type !== "item.completed" });
               break;
             }
             case "error":
