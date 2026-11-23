@@ -5,6 +5,7 @@ const { app, BrowserWindow, Menu, ShareMenu, Tray, clipboard, dialog, ipcMain, n
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline");
@@ -295,6 +296,95 @@ function codexHome() {
 // runId -> { child, threadId, exited: Promise that settles when the process is gone }
 const runs = new Map();
 
+// ---------------------------------------------------------------------------- live text
+// Codex's JSON events carry a reply only when it is complete, so up to 0.1.42 the app showed nothing
+// while the model wrote and then the whole reply at once. The agent's API requests now go through this
+// relay on 127.0.0.1: it forwards each request to the API unchanged, passes the response back byte for
+// byte, and on the way reports the streamed text and reasoning to the window ("live.*" events). The key
+// stays in Codex's own Authorization header; the relay adds nothing, so it is useless to anyone else.
+
+const relayRuns = new Map(); // runId -> send(event) for runs whose requests go through the relay
+let relayPort = null; // Promise of the port, or of null when the relay could not start
+
+// The prompt Codex sends when it compacts a long conversation: its summary is not a reply, so it is not shown.
+const COMPACTION_MARKER = Buffer.from("CONTEXT CHECKPOINT COMPACTION");
+const HOP_HEADERS = new Set(["host", "connection", "keep-alive", "content-length", "transfer-encoding", "accept-encoding", "content-encoding", "upgrade"]);
+
+function startRelay() {
+  relayPort ??= new Promise((resolve) => {
+    const server = http.createServer(relayRequest);
+    server.on("error", (e) => {
+      console.error("live text relay failed", e);
+      resolve(null); // runs then talk to the API directly, as before
+    });
+    server.listen(0, "127.0.0.1", () => resolve(server.address().port));
+  });
+  return relayPort;
+}
+
+async function relayRequest(req, res) {
+  // Paths look like /<runId>/responses: the run id says which conversation the text belongs to.
+  const [, runId, ...rest] = (req.url || "").split("/");
+  if (!runId || !rest.length) {
+    res.writeHead(404).end();
+    return;
+  }
+  const send = relayRuns.get(runId);
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  const body = Buffer.concat(chunks);
+  const headers = {};
+  for (const [k, v] of Object.entries(req.headers)) if (!HOP_HEADERS.has(k) && v !== undefined) headers[k] = v;
+  const ctrl = new AbortController();
+  res.on("close", () => !res.writableFinished && ctrl.abort()); // Codex gave up or was stopped
+  let upstream;
+  try {
+    upstream = await fetch(`${API}/${rest.join("/")}`, {
+      method: req.method,
+      headers,
+      body: ["GET", "HEAD"].includes(req.method) ? undefined : body,
+      signal: ctrl.signal,
+    });
+  } catch {
+    if (!res.headersSent) res.writeHead(502, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "Could not reach the OpenUncensored API." } }));
+    return;
+  }
+  const out = {};
+  upstream.headers.forEach((v, k) => !HOP_HEADERS.has(k) && (out[k] = v));
+  res.writeHead(upstream.status, out);
+  // Only replies stream into the window: not errors, and not the summary of a compaction.
+  const tee = send && req.method === "POST" && upstream.ok && /\/responses$/.test(req.url) && !body.includes(COMPACTION_MARKER);
+  if (tee) send({ type: "live.reset" });
+  const decoder = new TextDecoder();
+  let pending = "";
+  try {
+    for await (const chunk of upstream.body ?? []) {
+      if (tee) {
+        pending += decoder.decode(chunk, { stream: true });
+        const lines = pending.split("\n");
+        pending = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          let ev;
+          try {
+            ev = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+          if (typeof ev?.delta !== "string" || !ev.delta) continue;
+          if (ev.type === "response.output_text.delta") send({ type: "live.text", text: ev.delta });
+          else if (ev.type === "response.reasoning_summary_text.delta" || ev.type === "response.reasoning_text.delta") send({ type: "live.reasoning", text: ev.delta });
+        }
+      }
+      res.write(chunk);
+    }
+    res.end();
+  } catch {
+    res.destroy(); // Codex sees the stream break and retries, as it would on a direct connection
+  }
+}
+
 // Stops an agent run and everything it started. On Windows a child process only dies by itself, so
 // the commands and the image tool the agent launched lived on, and since they inherit its output pipe,
 // the run never looked finished: the conversation spun forever, and the next message failed with
@@ -354,10 +444,14 @@ async function startAgent(win, { runId, threadId, prompt, cwd, model }) {
     const compactAt = Math.min(Math.floor(window * 0.7), 250000);
     args.push("-c", `model_context_window=${window}`, "-c", `model_auto_compact_token_limit=${compactAt}`);
   }
+  // Through the live text relay when it is up; straight to the API (whole replies only) when it is not.
+  const port = await startRelay();
+  if (port) args.push("-c", `model_providers.openuncensored.base_url="http://127.0.0.1:${port}/${runId}"`);
   if (threadId) args.push("resume", threadId, prompt);
   else args.push(prompt);
   if (threadId) await endRunsOf(threadId);
   const send = (event) => !win.isDestroyed() && win.webContents.send("agent:event", { runId, event });
+  if (port) relayRuns.set(runId, send);
   if (!threadId) appEvent("app_agent_run", { model });
 
   // One retry when the conversation is still held: the previous run's process can take a moment to go.
@@ -393,6 +487,7 @@ async function startAgent(win, { runId, threadId, prompt, cwd, model }) {
         setTimeout(() => endRunsOf(threadId).then(() => launch(true)), 1500);
         return;
       }
+      relayRuns.delete(runId);
       send({ type: "run.exited", code, stderr: code ? stderr : "" });
     };
     // The run ends when the process exits, not when its output pipe closes: processes it started can

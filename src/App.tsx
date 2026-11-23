@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Link, Pencil, Pin, Plus, Share, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
 import {
   agentError,
@@ -1005,6 +1005,48 @@ function useAutoScroll(dep: unknown) {
 
 type Update = (id: string, fn: (c: Conversation) => Conversation) => void;
 
+// The reply and reasoning a run is streaming right now, per conversation (from the "live.*" events of the
+// relay in electron/main.cjs). Shown until the agent reports the finished message, which replaces it. Kept
+// out of the saved conversations and out of App's state: only the open conversation re-renders as it streams,
+// at most every 40 ms.
+type Live = { text: string; reasoning: string };
+const NO_LIVE: Live = { text: "", reasoning: "" };
+const liveText = (() => {
+  const map = new Map<string, Live>();
+  const subs = new Set<() => void>();
+  let timer: number | undefined;
+  const notify = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    subs.forEach((f) => f());
+  };
+  return {
+    get: (convoId: string) => map.get(convoId) ?? NO_LIVE,
+    subscribe(f: () => void) {
+      subs.add(f);
+      return () => void subs.delete(f);
+    },
+    // now: update the screen in the same render as the conversation change that goes with it (the finished
+    // message appears exactly as its live copy goes), instead of on the next 40 ms tick.
+    edit(convoId: string, fn: (l: Live) => Live, now = false) {
+      const next = fn(map.get(convoId) ?? NO_LIVE);
+      if (next.text || next.reasoning) map.set(convoId, next);
+      else map.delete(convoId);
+      if (now) notify();
+      else timer ??= window.setTimeout(notify, 40);
+    },
+  };
+})();
+
+function useLive(convoId: string): Live {
+  const [live, setLive] = useState(() => liveText.get(convoId));
+  useEffect(() => {
+    setLive(liveText.get(convoId));
+    return liveText.subscribe(() => setLive(liveText.get(convoId)));
+  }, [convoId]);
+  return live;
+}
+
 
 // Agent runs belong to the app, not to the open conversation's view: a run keeps reporting into its own
 // conversation while the user looks at another one (before 0.1.29 its events were dropped when the user
@@ -1059,6 +1101,17 @@ function useAgentRuns(update: Update, onSpent: () => void, convos: Conversation[
     [update],
   );
 
+  // Text that was streaming when a run ended without finishing its message (Stop, a failure) stays in the
+  // transcript as it was on screen.
+  const keepLive = useCallback(
+    (convoId: string) => {
+      const { text } = liveText.get(convoId);
+      if (text) upsert(convoId, { kind: "message", id: uid(), text });
+      liveText.edit(convoId, () => NO_LIVE, true);
+    },
+    [upsert],
+  );
+
   useEffect(
     () =>
       window.ou.onAgentEvent(({ runId, event }) => {
@@ -1080,10 +1133,23 @@ function useAgentRuns(update: Update, onSpent: () => void, convos: Conversation[
         };
         const type = event.type as string;
         const item = (event.item ?? {}) as Record<string, unknown>;
+        if (type.startsWith("live.")) {
+          // After Stop, the text that was on screen is kept as it was (see stop): nothing more is added.
+          if (stopped.current.has(runId)) return;
+          const text = String(event.text ?? "");
+          if (type === "live.reset") liveText.edit(convoId, () => NO_LIVE, true); // a new request (or a retry) starts
+          else if (type === "live.text") liveText.edit(convoId, (l) => ({ ...l, text: l.text + text }));
+          else if (type === "live.reasoning") liveText.edit(convoId, (l) => ({ ...l, reasoning: l.reasoning + text }));
+          return;
+        }
         if (type === "thread.started") {
           update(convoId, (c) => ({ ...c, threadId: event.thread_id as string }));
         } else if (type.startsWith("item.")) {
           const id = String(item.id);
+          // The agent's finished item replaces its live copy in the same render.
+          if (item.type === "agent_message") liveText.edit(convoId, (l) => ({ ...l, text: "" }), true);
+          else if (item.type === "reasoning") liveText.edit(convoId, (l) => ({ ...l, reasoning: "" }), true);
+          else if (item.type !== "error") liveText.edit(convoId, () => NO_LIVE, true);
           switch (item.type) {
             case "agent_message":
               put({ kind: "message", id, text: String(item.text ?? "") });
@@ -1122,9 +1188,13 @@ function useAgentRuns(update: Update, onSpent: () => void, convos: Conversation[
               break;
           }
         } else if (type === "turn.failed" || type === "error") {
+          if (type === "turn.failed") keepLive(convoId);
           const message = String((event.error as { message?: string })?.message ?? event.message ?? "The agent stopped.");
           putError(agentError(message));
+        } else if (type === "turn.completed") {
+          liveText.edit(convoId, () => NO_LIVE, true);
         } else if (type === "run.exited") {
+          keepLive(convoId);
           // A run the user stopped exits with an error by design: nothing to report.
           // The exit log only matters when nothing better was reported ("The agent stopped." after a real error is noise).
           if (event.code && event.stderr && !stopped.current.has(runId) && !hasError()) putError(agentError(String(event.stderr)));
@@ -1138,7 +1208,7 @@ function useAgentRuns(update: Update, onSpent: () => void, convos: Conversation[
           }
         }
       }),
-    [update, upsert, finish],
+    [update, upsert, finish, keepLive],
   );
 
   const send = useCallback(
@@ -1169,6 +1239,7 @@ function useAgentRuns(update: Update, onSpent: () => void, convos: Conversation[
     (convoId: string) => {
       const ids = [...runOf.current].filter(([, c]) => c === convoId).map(([r]) => r);
       if (!ids.length) return setRunning(convoId, false);
+      keepLive(convoId);
       update(convoId, (c) => ({ ...c, turns: settleRunning(c.turns) }));
       for (const runId of ids) {
         stopped.current.add(runId);
@@ -1176,7 +1247,7 @@ function useAgentRuns(update: Update, onSpent: () => void, convos: Conversation[
         setTimeout(() => runOf.current.has(runId) && finish(runId), 3000);
       }
     },
-    [update, finish, setRunning],
+    [update, finish, setRunning, keepLive],
   );
 
   return useMemo(() => ({ busy, send, stop }), [busy, send, stop]);
@@ -1210,6 +1281,13 @@ function AgentView({
     if (convo.draft !== undefined) update(convo.id, (c) => ({ ...c, draft: undefined }));
   }, [convo.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const scroller = useAutoScroll(convo.turns);
+  const live = useLive(convo.id);
+  const streaming = busy && Boolean(live.text);
+  // Streaming text keeps the newest words in view, unless the user has scrolled up to read.
+  useEffect(() => {
+    const el = scroller.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
+  }, [live, scroller]);
   const send = (prompt: string) => runs.send(convo, prompt);
   const stop = () => runs.stop(convo.id);
 
@@ -1291,7 +1369,9 @@ function AgentView({
                 {(t.items ?? []).map((it) => (
                   <AgentItemView key={it.id} item={it} />
                 ))}
-                {busy && i === convo.turns.length - 1 && (
+                {busy && i === convo.turns.length - 1 && live.reasoning && <AgentItemView item={{ kind: "reasoning", id: "live-reasoning", text: live.reasoning }} />}
+                {busy && i === convo.turns.length - 1 && live.text && <AgentItemView item={{ kind: "message", id: "live-text", text: live.text }} />}
+                {busy && i === convo.turns.length - 1 && !streaming && (
                   <div className="flex items-center gap-2 py-1 text-[12.5px] text-fg-3">
                     <Spinner />
                     <span className="truncate">{drawing ? "Generating image" : running ? `Running ${cleanCommand(running.command).slice(0, 60)}` : "Thinking"}</span>
@@ -1331,7 +1411,8 @@ const cleanCommand = (cmd: string) =>
     .replace(/^"?(?:[^"]*[\\/])?(?:powershell|pwsh)(?:\.exe)?"?\s+(?:-\w+\s+)*?-Command\s+/i, "")
     .replace(/^(["'])([\s\S]*)\1$/, "$2");
 
-function AgentItemView({ item }: { item: AgentItem }) {
+// Memoized: while a reply streams, the conversation re-renders every 40 ms, and finished items have not changed.
+const AgentItemView = memo(function AgentItemView({ item }: { item: AgentItem }) {
   const [open, setOpen] = useState(false);
   switch (item.kind) {
     case "message":
@@ -1401,7 +1482,7 @@ function AgentItemView({ item }: { item: AgentItem }) {
     case "error":
       return <div className="whitespace-pre-wrap break-words rounded-lg border border-bad/30 bg-bad/[0.06] px-3 py-2 text-[12.5px] text-bad">{agentError(item.text)}</div>;
   }
-}
+});
 
 // What the user sent: their attachments (thumbnails and chips), then their text. The <..._attached> tags
 // stay in the stored text for the agent; they are never shown.
