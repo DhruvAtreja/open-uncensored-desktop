@@ -227,6 +227,11 @@ function imageToolPath() {
   return path.join(__dirname, "image-tool.cjs").replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
 }
 
+// The web tool (web-tool.cjs): web_search through the OpenUncensored API, read_page fetched locally.
+function webToolPath() {
+  return path.join(__dirname, "web-tool.cjs").replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+}
+
 // A private Codex home, so the app never touches the user's own ~/.codex setup. Our own system
 // prompt (agent-prompt.md) replaces Codex's, and Codex's extras (skills, including the user's
 // personal ones, memories, goals, sub-agents, apps, OpenAI-hosted tools) are switched off.
@@ -287,6 +292,15 @@ function codexHome() {
       'env_vars = ["OU_API_KEY", "OU_IMAGE_DIR"]',
       "startup_timeout_sec = 20",
       "tool_timeout_sec = 300",
+      "",
+      // web_search / read_page: Brave results through our API (billed to the same key) and local page reading.
+      "[mcp_servers.web]",
+      `command = ${JSON.stringify(process.execPath)}`,
+      `args = [${JSON.stringify(webToolPath())}]`,
+      'env = { ELECTRON_RUN_AS_NODE = "1" }',
+      'env_vars = ["OU_API_KEY"]',
+      "startup_timeout_sec = 20",
+      "tool_timeout_sec = 60",
       "",
     ].join("\n"),
   );
