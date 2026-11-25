@@ -183,9 +183,10 @@ export const cachedModels = (): Promise<ModelInfo[]> => window.ou.getModelsCache
 export const saveModels = (list: ModelInfo[]) => window.ou.setModelsCache(list).catch(() => {});
 
 // Throws when the API does not answer, so the caller can retry. The rankings (from the website) only
-// add scores and ranks: without them the models still load, unranked.
+// add scores and ranks: without them the models still load, unranked. The list is asked for with the
+// key, so a key allowed to see models still being tested (the router's OU_PREVIEW_CUSTOMERS) gets them too.
 export async function fetchModels(): Promise<ModelInfo[]> {
-  const [rankings, catalog] = await Promise.all([get(`${SITE}/api/rankings.json`).catch(() => ({}) as Record<string, unknown>), get(`${API}/models`)]);
+  const [rankings, catalog] = await Promise.all([get(`${SITE}/api/rankings.json`).catch(() => ({}) as Record<string, unknown>), get(`${API}/models`, true)]);
   if (!Array.isArray(catalog.data) || catalog.data.length === 0) throw new Error("model list unavailable");
   const scores = new Map<string, Record<string, unknown>>(
     ((rankings.models as Record<string, unknown>[]) ?? []).map((m) => [m.id as string, m]),
