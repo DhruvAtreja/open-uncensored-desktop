@@ -92,6 +92,7 @@ async function api(pathname, init = {}) {
     headers: {
       "Content-Type": "application/json",
       "X-Title": "OpenUncensored Desktop",
+      ...(process.env.OU_INSTALL_ID ? { "X-OU-Install": process.env.OU_INSTALL_ID } : {}),
       ...(key ? { Authorization: `Bearer ${key}` } : {}),
       ...(init.headers || {}),
     },

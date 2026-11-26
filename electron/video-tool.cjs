@@ -98,7 +98,8 @@ function videoExt(buf) {
 
 function headers(extra = {}) {
   const key = process.env.OU_API_KEY;
-  return { "X-Title": "OpenUncensored Desktop", ...(key ? { Authorization: `Bearer ${key}` } : {}), ...extra };
+  const install = process.env.OU_INSTALL_ID ? { "X-OU-Install": process.env.OU_INSTALL_ID } : {};
+  return { "X-Title": "OpenUncensored Desktop", ...install, ...(key ? { Authorization: `Bearer ${key}` } : {}), ...extra };
 }
 
 async function api(pathname, init = {}, timeoutMs = 60000) {

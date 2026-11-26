@@ -76,6 +76,7 @@ export default function App() {
   const [convos, setConvos] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [credit, setCredit] = useState<number | null>(null);
+  const [promo, setPromo] = useState(false); // the key came from a promo code (desktop only, no top-ups)
   const [settings, setSettings] = useState(false);
   const [feedback, setFeedback] = useState(false);
   const [appUpdate, setAppUpdate] = useState<UpdateState>({ status: "idle" });
@@ -192,10 +193,12 @@ export default function App() {
     const run = ++creditRun.current;
     let delay = 2000;
     const load = () =>
-      balance().then((usd) => {
+      balance().then((b) => {
         if (run !== creditRun.current) return;
-        if (usd !== null) setCredit(usd);
-        else if (delay <= 60000) {
+        if (b !== null) {
+          setCredit(b.usd);
+          setPromo(b.promo);
+        } else if (delay <= 60000) {
           setTimeout(load, delay);
           delay *= 2;
         }
@@ -431,6 +434,8 @@ export default function App() {
         <Settings
           apiKey={key}
           credit={credit}
+          promo={promo}
+          onKey={setKey}
           onClose={() => setSettings(false)}
           onRefresh={refreshCredit}
           onSignOut={() => window.ou.setKey(null).then(() => setKey(null))}
@@ -1667,6 +1672,53 @@ function Purchase({ topUpKey, onKey, onDone }: { topUpKey?: string; onKey?: (k: 
   );
 }
 
+// A promo code from OpenUncensored: a new key with free credit that works only in this app install.
+// The main process swaps it in and keeps the key that was in use, to switch back to in Settings.
+function PromoCode({ onKey }: { onKey: (k: string) => void }) {
+  const [code, setCode] = useState("");
+  const [state, setState] = useState<"idle" | "busy" | "error" | "done">("idle");
+  const [message, setMessage] = useState("");
+  const valid = /^[A-Za-z0-9][A-Za-z0-9 -]{4,40}$/.test(code.trim());
+  const redeem = async () => {
+    if (!valid || state === "busy") return;
+    setState("busy");
+    setMessage("");
+    const r = await window.ou.redeemPromo(code.trim());
+    if (!r.key) {
+      setState("error");
+      setMessage(r.error ?? "That promo code did not work.");
+      return;
+    }
+    setState("done");
+    setCode("");
+    setMessage(`Added $${((r.credits_cents ?? 0) / 100).toFixed(2)} of promo credit. It works only in this app.`);
+    onKey(r.key);
+  };
+  return (
+    <div>
+      <div className="flex gap-2">
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          onKeyDown={(e) => e.key === "Enter" && redeem()}
+          placeholder="OU-XXXX-XXXX"
+          spellCheck={false}
+          className="min-w-0 flex-1 rounded-lg border border-white/10 bg-ink px-3 py-2 font-mono text-[12px] uppercase outline-none transition-colors focus:border-white/25"
+        />
+        <button
+          disabled={!valid || state === "busy"}
+          onClick={redeem}
+          className="flex items-center gap-1.5 rounded-lg bg-fg px-3.5 py-2 text-[12.5px] font-medium text-ink transition-opacity disabled:opacity-30"
+        >
+          {state === "busy" && <Spinner className="h-3 w-3" />}
+          Redeem
+        </button>
+      </div>
+      {message && <p className={`mt-2.5 text-[12px] ${state === "error" ? "text-bad" : "text-ok"}`}>{message}</p>}
+    </div>
+  );
+}
+
 function KeySetup({ onKey }: { onKey: (k: string) => void }) {
   const [value, setValue] = useState("");
   const valid = useMemo(() => /^ou-cus_[A-Za-z0-9]+-[a-f0-9]{40}$/.test(value.trim()), [value]);
@@ -1708,6 +1760,12 @@ function KeySetup({ onKey }: { onKey: (k: string) => void }) {
               Lost your key? Get a new one by email, with the same credits
             </button>
           </div>
+          <div className="mt-3 rounded-2xl border border-white/[0.08] bg-ink-3 p-5">
+            <p className="text-[13.5px] font-medium">Have a promo code?</p>
+            <div className="mt-3">
+              <PromoCode onKey={onKey} />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1717,16 +1775,29 @@ function KeySetup({ onKey }: { onKey: (k: string) => void }) {
 function Settings({
   apiKey,
   credit,
+  promo,
+  onKey,
   onClose,
   onRefresh,
   onSignOut,
 }: {
   apiKey: string;
   credit: number | null;
+  promo: boolean;
+  onKey: (k: string) => void;
   onClose: () => void;
   onRefresh: () => void;
   onSignOut: () => void;
 }) {
+  // The key used before this one (a bought key while a promo key is in use, or the other way round).
+  const [previous, setPrevious] = useState<string | null>(null);
+  useEffect(() => {
+    window.ou.previousKey().then(setPrevious);
+  }, [apiKey]);
+  const swap = async () => {
+    const k = await window.ou.swapKey();
+    if (k) onKey(k);
+  };
   // The key lives only on this computer and, when bought in the app, was never shown: removing it
   // without a copy loses the credits on it. So removal asks first and offers a copy.
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -1760,7 +1831,9 @@ function Settings({
           <p className="text-[12px] text-fg-3">Balance</p>
           <p className="mt-0.5 text-[28px] font-semibold tabular-nums tracking-tight">{typeof credit === "number" ? `$${credit.toFixed(2)}` : "–"}</p>
           <div className="mt-1 flex items-center justify-between gap-3">
-            <p className="text-[11.5px] text-fg-3">Key ending …{apiKey.slice(-4)}, stored only on this computer</p>
+            <p className="text-[11.5px] text-fg-3">
+              {promo ? "Promo key" : "Key"} ending …{apiKey.slice(-4)}, stored only on this computer
+            </p>
             <button
               onClick={copy}
               className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[11.5px] text-fg-2 transition-colors hover:border-white/25 hover:text-fg"
@@ -1769,8 +1842,26 @@ function Settings({
             </button>
           </div>
         </div>
+        {promo && (
+          <p className="mt-2.5 text-[11.5px] leading-relaxed text-fg-3">
+            Promo credit works only in this app and cannot be topped up. Buying credit below gives you a new key.
+          </p>
+        )}
+        {previous && (
+          <div className="mt-2.5 flex items-center justify-between gap-3">
+            <p className="text-[11.5px] text-fg-3">Also saved: key ending …{previous}</p>
+            <button
+              onClick={swap}
+              className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[11.5px] text-fg-2 transition-colors hover:border-white/25 hover:text-fg"
+            >
+              Switch to it
+            </button>
+          </div>
+        )}
         <p className="mb-2.5 mt-5 text-[13px] font-medium">Add credit</p>
-        <Purchase topUpKey={apiKey} onDone={onRefresh} />
+        {promo ? <Purchase onKey={onKey} onDone={onRefresh} /> : <Purchase topUpKey={apiKey} onDone={onRefresh} />}
+        <p className="mb-2.5 mt-5 text-[13px] font-medium">Promo code</p>
+        <PromoCode onKey={onKey} />
         {confirmRemove ? (
           <div className="mt-6 rounded-xl border border-bad/30 bg-bad/[0.06] p-4">
             <p className="text-[13px] font-medium">Remove your key from this {device}?</p>

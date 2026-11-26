@@ -101,7 +101,7 @@ export interface Conversation {
 }
 
 export interface UpdateState {
-  status: "idle" | "checking" | "downloading" | "ready" | "error";
+  status: "idle" | "checking" | "downloading" | "ready" | "installing" | "error";
   version?: string; // the new version
   current?: string; // this app's version
   message?: string;
@@ -114,6 +114,9 @@ declare global {
       getKey(): Promise<string | null>;
       setKey(key: string | null): Promise<void>;
       copyKey(): Promise<boolean>;
+      redeemPromo(code: string): Promise<{ key?: string; credits_cents?: number; error?: string }>;
+      previousKey(): Promise<string | null>;
+      swapKey(): Promise<string | null>;
       getModelsCache(): Promise<ModelInfo[]>;
       setModelsCache(list: ModelInfo[]): Promise<void>;
       getConversations(): Promise<Conversation[]>;
@@ -234,10 +237,12 @@ export async function suggestTitle(prompt: string): Promise<string | null> {
   return r.status === 200 && title && title.split(/\s+/).length <= 8 ? title : null;
 }
 
-export async function balance(): Promise<number | null> {
+export async function balance(): Promise<{ usd: number; promo: boolean } | null> {
   const r = await window.ou.request({ url: `${API}/credits` });
-  const usd = (r.json as { data?: { remaining_usd?: unknown } }).data?.remaining_usd;
-  return r.status === 200 && typeof usd === "number" ? usd : null;
+  const data = (r.json as { data?: { remaining_usd?: unknown; promo?: unknown } }).data;
+  const usd = data?.remaining_usd;
+  // promo: a key from a promo code, which works only in this app and is never topped up
+  return r.status === 200 && typeof usd === "number" ? { usd, promo: data?.promo === true } : null;
 }
 
 // Feedback goes to the site's feedback box (emailed to the team, stored), sent with the key so it is

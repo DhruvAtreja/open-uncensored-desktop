@@ -70,7 +70,12 @@ async function webSearch(args) {
   try {
     const res = await fetch(`${API}/search`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Title": "OpenUncensored Desktop", Authorization: `Bearer ${key}` },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Title": "OpenUncensored Desktop",
+        ...(process.env.OU_INSTALL_ID ? { "X-OU-Install": process.env.OU_INSTALL_ID } : {}),
+        Authorization: `Bearer ${key}`,
+      },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(45000),
     });

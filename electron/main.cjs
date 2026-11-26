@@ -66,6 +66,25 @@ function readKey() {
   return keyCache;
 }
 
+// The key the app used before the current one (a promo key replacing a bought key, or the other way
+// round), so Settings can switch back. Same plain file and permissions as the key itself.
+const PREVIOUS_KEY_FILE = "api-key.previous";
+
+function readPreviousKey() {
+  try {
+    return fs.readFileSync(data(PREVIOUS_KEY_FILE), "utf8").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function savePreviousKey(key) {
+  const file = data(PREVIOUS_KEY_FILE);
+  if (!key) return fs.rmSync(file, { force: true });
+  fs.writeFileSync(file, key, { mode: 0o600 });
+  fs.chmodSync(file, 0o600);
+}
+
 function writeKey(key) {
   keyCache = key || null;
   fs.rmSync(data(LEGACY_KEY_FILE), { force: true });
@@ -286,7 +305,8 @@ function codexHome() {
       'env_key = "OU_API_KEY"',
       'wire_api = "responses"',
       // Names the app in the request log, so agent traffic from here is told apart from other Codex users.
-      'http_headers = { "X-Title" = "OpenUncensored Desktop" }',
+      // The install id too: a promo code key works only in the install that redeemed it (router PROMO_*).
+      `http_headers = { "X-Title" = "OpenUncensored Desktop", "X-OU-Install" = "${installId()}" }`,
       "",
       // generate_image / list_image_models: pictures from the uncensored image models, saved into
       // the conversation's folder (OU_IMAGE_DIR) and billed to the same key.
@@ -294,7 +314,7 @@ function codexHome() {
       `command = ${JSON.stringify(process.execPath)}`,
       `args = [${JSON.stringify(imageToolPath())}]`,
       'env = { ELECTRON_RUN_AS_NODE = "1" }',
-      'env_vars = ["OU_API_KEY", "OU_IMAGE_DIR"]',
+      'env_vars = ["OU_API_KEY", "OU_IMAGE_DIR", "OU_INSTALL_ID"]',
       "startup_timeout_sec = 20",
       "tool_timeout_sec = 300",
       "",
@@ -304,7 +324,7 @@ function codexHome() {
       `command = ${JSON.stringify(process.execPath)}`,
       `args = [${JSON.stringify(videoToolPath())}]`,
       'env = { ELECTRON_RUN_AS_NODE = "1" }',
-      'env_vars = ["OU_API_KEY", "OU_IMAGE_DIR"]',
+      'env_vars = ["OU_API_KEY", "OU_IMAGE_DIR", "OU_INSTALL_ID"]',
       "startup_timeout_sec = 20",
       "tool_timeout_sec = 900",
       "",
@@ -313,7 +333,7 @@ function codexHome() {
       `command = ${JSON.stringify(process.execPath)}`,
       `args = [${JSON.stringify(webToolPath())}]`,
       'env = { ELECTRON_RUN_AS_NODE = "1" }',
-      'env_vars = ["OU_API_KEY"]',
+      'env_vars = ["OU_API_KEY", "OU_INSTALL_ID"]',
       "startup_timeout_sec = 20",
       "tool_timeout_sec = 60",
       "",
@@ -487,7 +507,7 @@ async function startAgent(win, { runId, threadId, prompt, cwd, model }) {
   const launch = (retried) => {
     const child = spawn(bin, args, {
       cwd,
-      env: { ...process.env, OU_API_KEY: key, OU_IMAGE_DIR: cwd, CODEX_HOME: codexHome(), PATH: `${toolsDir}${path.delimiter}${process.env.PATH}` },
+      env: { ...process.env, OU_API_KEY: key, OU_INSTALL_ID: installId(), OU_IMAGE_DIR: cwd, CODEX_HOME: codexHome(), PATH: `${toolsDir}${path.delimiter}${process.env.PATH}` },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -566,7 +586,7 @@ async function chatStream(win, { streamId, model, messages }) {
   try {
     const res = await fetch(`${API}/chat/completions`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "X-Title": "OpenUncensored Desktop" },
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "X-Title": "OpenUncensored Desktop", "X-OU-Install": installId() },
       body: JSON.stringify({ model, messages, stream: true }),
       signal: ctrl.signal,
     });
@@ -721,8 +741,36 @@ const openDialog = (e, properties) => {
 function registerIpc() {
   ipcMain.handle("key:get", () => readKey());
   ipcMain.handle("key:set", (_e, key) => {
+    const current = readKey();
+    if (key && current && current !== key) savePreviousKey(current);
     writeKey(key);
     if (key) appEvent("app_key");
+  });
+  // A promo code (openuncensored.com/api/promo/redeem): a new key with free credit that works only in this
+  // install (the request sends X-OU-Install). The key in use before stays saved, to switch back to.
+  ipcMain.handle("promo:redeem", async (_e, code) => {
+    const r = await request({ url: "https://openuncensored.com/api/promo/redeem", method: "POST", auth: false, body: { code: String(code || "").trim() } });
+    const key = r.json && typeof r.json.key === "string" ? r.json.key : null;
+    if (r.status !== 200 || !key) {
+      const err = r.json && r.json.error;
+      return { error: typeof err === "string" ? err : err && err.message ? err.message : r.status ? `HTTP ${r.status}` : "Could not reach OpenUncensored." };
+    }
+    const current = readKey();
+    if (current && current !== key) savePreviousKey(current);
+    writeKey(key);
+    appEvent("app_key", { promo: true });
+    return { key, credits_cents: r.json.credits_cents };
+  });
+  ipcMain.handle("key:previous", () => {
+    const previous = readPreviousKey();
+    return previous ? previous.slice(-4) : null;
+  });
+  ipcMain.handle("key:swap", () => {
+    const previous = readPreviousKey();
+    if (!previous) return null;
+    savePreviousKey(readKey());
+    writeKey(previous);
+    return previous;
   });
   // Copies the stored key, so a buyer whose key arrived straight into the app can keep a copy.
   ipcMain.handle("key:copy", () => {
