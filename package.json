@@ -1,7 +1,7 @@
 {
   "name": "open-uncensored-desktop",
   "productName": "OpenUncensored",
-  "version": "0.1.45",
+  "version": "0.1.46",
   "description": "Chat and a coding agent on uncensored models, from OpenUncensored.",
   "license": "MIT",
   "private": true,
@@ -46,6 +46,7 @@
       "node_modules/@openai/codex-darwin-*/**",
       "node_modules/@openai/codex-win32-*/**",
       "electron/image-tool.cjs",
+      "electron/video-tool.cjs",
       "electron/web-tool.cjs"
     ],
     "mac": {

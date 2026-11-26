@@ -20,6 +20,7 @@ export type AgentItem =
   | { kind: "command"; id: string; command: string; output: string; exitCode: number | null; running: boolean }
   | { kind: "file"; id: string; summary: string }
   | { kind: "image"; id: string; prompt: string; model: string; files: string[]; error: string; running: boolean }
+  | { kind: "video"; id: string; prompt: string; model: string; files: string[]; error: string; running: boolean }
   | { kind: "error"; id: string; text: string };
 
 // Agent errors in plain words. The agent is built on the open source Codex CLI, but users never need to
@@ -56,15 +57,16 @@ export function agentError(raw: string): string {
 // Saved conversations can hold steps marked as running from a run that ended without saying so (the app
 // was closed or crashed, or the run was stopped). On load and on Stop they are marked as finished.
 export function settleRunning(turns: Turn[]): Turn[] {
-  if (!turns.some((t) => t.items?.some((i) => (i.kind === "command" || i.kind === "image") && i.running))) return turns;
+  const isRunning = (i: AgentItem) => (i.kind === "command" || i.kind === "image" || i.kind === "video") && i.running;
+  if (!turns.some((t) => t.items?.some(isRunning))) return turns;
   return turns.map((t) =>
-    t.items?.some((i) => (i.kind === "command" || i.kind === "image") && i.running)
+    t.items?.some(isRunning)
       ? {
           ...t,
           items: t.items.map((i) =>
             i.kind === "command" && i.running
               ? { ...i, running: false }
-              : i.kind === "image" && i.running
+              : (i.kind === "image" || i.kind === "video") && i.running
                 ? { ...i, running: false, error: i.files.length ? i.error : "Stopped." }
                 : i,
           ),
@@ -122,6 +124,8 @@ declare global {
       openUrl(url: string): Promise<void>;
       readImage(file: string): Promise<string | null>;
       openImage(file: string): Promise<void>;
+      readVideo(file: string): Promise<Uint8Array | null>;
+      openVideo(file: string): Promise<void>;
       pasteImage(bytes: ArrayBuffer, type: string): Promise<string | null>;
       saveFile(bytes: ArrayBuffer, name: string): Promise<string | null>;
       pathForFile(file: File): string;
@@ -292,6 +296,8 @@ export function shareMessages(convo: Conversation): SharedMessage[] {
         for (const i of t.items) if (i.kind === "message") parts.push(i.text);
         const made = t.items.reduce((n, i) => n + (i.kind === "image" ? i.files.length : 0), 0);
         if (made) parts.push(`[${plural(made, "image")} made, not included]`);
+        const clips = t.items.reduce((n, i) => n + (i.kind === "video" ? i.files.length : 0), 0);
+        if (clips) parts.push(`[${plural(clips, "video")} made, not included]`);
       } else parts.push(t.text);
     }
     const content = parts.filter((p) => p && p.trim()).join("\n\n");
@@ -354,6 +360,7 @@ export function branchContext(turns: Turn[], maxChars = 40_000): string {
       else if (it.kind === "command") lines.push(`[ran: ${it.command}${it.exitCode ? ` (exit ${it.exitCode})` : ""}]${it.output ? `\n${it.output.slice(-1500)}` : ""}`);
       else if (it.kind === "file") lines.push(`[edited files: ${it.summary}]`);
       else if (it.kind === "image") lines.push(`[generated image${it.files.length ? `: ${it.files.join(", ")}` : ""} with ${it.model}: ${it.prompt}]`);
+      else if (it.kind === "video") lines.push(`[generated video${it.files.length ? `: ${it.files.join(", ")}` : ""} with ${it.model}: ${it.prompt}]`);
       else if (it.kind === "error") lines.push(`[error: ${it.text}]`);
     }
     if (t.text) lines.push(t.text);

@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld("ou", {
   openUrl: (url) => ipcRenderer.invoke("open:url", url),
   readImage: (file) => ipcRenderer.invoke("image:read", file),
   openImage: (file) => ipcRenderer.invoke("image:open", file),
+  readVideo: (file) => ipcRenderer.invoke("video:read", file),
+  openVideo: (file) => ipcRenderer.invoke("video:open", file),
   pasteImage: (bytes, type) => ipcRenderer.invoke("image:paste", { bytes, type }),
   saveFile: (bytes, name) => ipcRenderer.invoke("file:save", { bytes, name }),
   showFile: (file) => ipcRenderer.invoke("file:show", file),

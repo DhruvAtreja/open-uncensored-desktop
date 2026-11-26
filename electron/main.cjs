@@ -227,6 +227,11 @@ function imageToolPath() {
   return path.join(__dirname, "image-tool.cjs").replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
 }
 
+// The video tool (video-tool.cjs): image-to-video clips through the OpenUncensored API, unpacked like the image tool.
+function videoToolPath() {
+  return path.join(__dirname, "video-tool.cjs").replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+}
+
 // The web tool (web-tool.cjs): web_search through the OpenUncensored API, read_page fetched locally.
 function webToolPath() {
   return path.join(__dirname, "web-tool.cjs").replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
@@ -292,6 +297,16 @@ function codexHome() {
       'env_vars = ["OU_API_KEY", "OU_IMAGE_DIR"]',
       "startup_timeout_sec = 20",
       "tool_timeout_sec = 300",
+      "",
+      // generate_video / list_video_models: a picture animated into a short clip (image to video). The call
+      // waits for the clip (1 to 4 minutes, given up after 10) and saves the MP4 next to the images.
+      "[mcp_servers.videos]",
+      `command = ${JSON.stringify(process.execPath)}`,
+      `args = [${JSON.stringify(videoToolPath())}]`,
+      'env = { ELECTRON_RUN_AS_NODE = "1" }',
+      'env_vars = ["OU_API_KEY", "OU_IMAGE_DIR"]',
+      "startup_timeout_sec = 20",
+      "tool_timeout_sec = 900",
       "",
       // web_search / read_page: Brave results through our API (billed to the same key) and local page reading.
       "[mcp_servers.web]",
@@ -774,6 +789,19 @@ function registerIpc() {
     }
   });
   ipcMain.handle("image:open", (_e, file) => isImage(file) && fs.existsSync(file) && shell.openPath(file));
+  // Clips the video tool saved: their bytes for an inline player (the page makes a blob: URL of them, lighter
+  // than a base64 data URL for a large file) and the default video player on request. Only video files.
+  const isVideo = (p) => typeof p === "string" && path.isAbsolute(p) && /\.(mp4|webm|mov)$/i.test(p);
+  ipcMain.handle("video:read", (_e, file) => {
+    if (!isVideo(file)) return null;
+    try {
+      if (fs.statSync(file).size > 100 * 1024 * 1024) return null;
+      return fs.readFileSync(file);
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.handle("video:open", (_e, file) => isVideo(file) && fs.existsSync(file) && shell.openPath(file));
   // An attached file's chip: shows the file in Finder / Explorer (never opens or runs it).
   ipcMain.handle("file:show", (_e, file) => typeof file === "string" && path.isAbsolute(file) && fs.existsSync(file) && shell.showItemInFolder(file));
   // An image pasted into the message box: saved to a temp folder, and its path goes in the message

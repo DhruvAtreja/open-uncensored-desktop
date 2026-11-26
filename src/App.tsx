@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Link, Pencil, Pin, Plus, Share, Sidebar, Spinner, Square, Terminal, Trash, X } from "./icons";
+import { ArrowUp, Chat, Check, ChevronRight, File, Folder, Gear, ImageIcon, Link, Pencil, Pin, Plus, Share, Sidebar, Spinner, Square, Terminal, Trash, VideoIcon, X } from "./icons";
 import {
   agentError,
   type AgentItem,
@@ -1173,7 +1173,17 @@ function useAgentRuns(update: Update, onSpent: () => void, convos: Conversation[
               break;
             }
             case "mcp_tool_call": {
-              // The image tool (electron/image-tool.cjs); other MCP tools are not configured.
+              // The video tool (electron/video-tool.cjs): one clip animated from a picture.
+              if (item.tool === "generate_video") {
+                const args = (item.arguments ?? {}) as { prompt?: string; model?: string };
+                const result = (item.result ?? {}) as { content?: { type: string; text?: string }[]; structured_content?: { files?: string[]; model?: string } };
+                const files = result.structured_content?.files ?? [];
+                const text = (result.content ?? []).map((c) => c.text ?? "").join("\n");
+                const error = (item.error as { message?: string } | null)?.message ?? (item.status === "failed" || (!files.length && type === "item.completed") ? text || "Video generation failed." : "");
+                put({ kind: "video", id, prompt: String(args.prompt ?? ""), model: String(result.structured_content?.model ?? args.model ?? "minimax-h3-chili-image-to-video"), files, error, running: type !== "item.completed" });
+                break;
+              }
+              // The image tool (electron/image-tool.cjs); the web tool's calls are not shown.
               if (item.tool !== "generate_image") break;
               const args = (item.arguments ?? {}) as { prompt?: string; model?: string; reference_images?: string[] };
               const result = (item.result ?? {}) as { content?: { type: string; text?: string }[]; structured_content?: { files?: string[]; model?: string } };
@@ -1295,6 +1305,7 @@ function AgentView({
   const lastItems = convo.turns[convo.turns.length - 1]?.items ?? [];
   const running = lastItems.findLast((i) => i.kind === "command" && i.running) as Extract<AgentItem, { kind: "command" }> | undefined;
   const drawing = lastItems.some((i) => i.kind === "image" && i.running);
+  const filming = lastItems.some((i) => i.kind === "video" && i.running);
 
   return (
     <>
@@ -1374,7 +1385,7 @@ function AgentView({
                 {busy && i === convo.turns.length - 1 && !streaming && (
                   <div className="flex items-center gap-2 py-1 text-[12.5px] text-fg-3">
                     <Spinner />
-                    <span className="truncate">{drawing ? "Generating image" : running ? `Running ${cleanCommand(running.command).slice(0, 60)}` : "Thinking"}</span>
+                    <span className="truncate">{filming ? "Generating video" : drawing ? "Generating image" : running ? `Running ${cleanCommand(running.command).slice(0, 60)}` : "Thinking"}</span>
                   </div>
                 )}
                 {!(busy && i === convo.turns.length - 1) && (
@@ -1479,6 +1490,28 @@ const AgentItemView = memo(function AgentItemView({ item }: { item: AgentItem })
           {item.error && <div className="whitespace-pre-wrap break-words rounded-lg border border-bad/30 bg-bad/[0.06] px-3 py-2 text-[12.5px] text-bad">{item.error}</div>}
         </div>
       );
+    case "video":
+      return (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-[12.5px] text-fg-3">
+            <span className={item.running ? "text-blue" : item.error ? "text-bad" : "text-ok"}>
+              {item.running ? <Spinner /> : item.error ? <X className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+            </span>
+            <VideoIcon className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 truncate">
+              {item.running ? "Generating video" : "Generated video"} with {item.model}: <span className="text-fg-2">{item.prompt}</span>
+            </span>
+          </div>
+          {item.files.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {item.files.map((f) => (
+                <LocalVideo key={f} file={f} />
+              ))}
+            </div>
+          )}
+          {item.error && <div className="whitespace-pre-wrap break-words rounded-lg border border-bad/30 bg-bad/[0.06] px-3 py-2 text-[12.5px] text-bad">{item.error}</div>}
+        </div>
+      );
     case "error":
       return <div className="whitespace-pre-wrap break-words rounded-lg border border-bad/30 bg-bad/[0.06] px-3 py-2 text-[12.5px] text-bad">{agentError(item.text)}</div>;
   }
@@ -1540,6 +1573,46 @@ function LocalImage({ file, small = false }: { file: string; small?: boolean }) 
         </div>
       )}
     </button>
+  );
+}
+
+// A clip the video tool saved in the conversation's folder: played inline from a blob: URL of its bytes
+// (freed when it leaves the screen); its name below opens it in the default video player.
+const VIDEO_TYPES: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime" };
+function LocalVideo({ file }: { file: string }) {
+  const [src, setSrc] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    let url = "";
+    window.ou.readVideo(file).then((bytes) => {
+      if (!live) return;
+      if (!bytes) return setSrc(null);
+      const type = VIDEO_TYPES[file.split(".").pop()?.toLowerCase() ?? ""] ?? "video/mp4";
+      url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));
+      setSrc(url);
+    });
+    return () => {
+      live = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [file]);
+  if (src === null) return <span className="rounded-md bg-white/[0.04] px-2 py-1 font-mono text-[11.5px] text-fg-3">{baseName(file)} (moved or deleted)</span>;
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <div className="overflow-hidden rounded-xl border border-white/[0.07] bg-black/40">
+        {src ? (
+          <video src={src} controls playsInline preload="metadata" className="block max-h-[360px] max-w-[480px]" />
+        ) : (
+          <div className="grid h-[200px] w-[320px] place-items-center">
+            <Spinner />
+          </div>
+        )}
+      </div>
+      <button onClick={() => window.ou.openVideo(file)} title={`Open ${file} in your video player`} className="flex max-w-[480px] items-center gap-1.5 text-[11.5px] text-fg-3 hover:text-fg">
+        <VideoIcon className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">{baseName(file)}</span>
+      </button>
+    </div>
   );
 }
 
