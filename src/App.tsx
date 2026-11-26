@@ -1824,7 +1824,9 @@ function UpdateLine() {
   const label =
     u.status === "ready"
       ? null
-      : u.status === "downloading"
+      : u.status === "installing"
+        ? `Installing ${u.version}…`
+        : u.status === "downloading"
         ? `Downloading ${u.version}…`
         : u.status === "checking"
           ? "Checking…"

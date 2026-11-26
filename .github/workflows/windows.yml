@@ -17,13 +17,17 @@ on:
         description: "Instead of building: install the previous release and check it self-updates to the latest"
         type: boolean
         default: false
+      auto_update_test:
+        description: "Instead: build this code as an old version and check a downloaded update installs with no click (on quit, and when idle)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
   windows:
-    if: ${{ !inputs.update_test }}
+    if: ${{ !inputs.update_test && !inputs.auto_update_test }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,3 +142,52 @@ jobs:
           name: windows-self-update
           path: ${{ runner.temp }}/update
 
+  auto-update:
+    if: ${{ inputs.auto_update_test }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [quit, idle]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build this code as an old version
+        shell: pwsh
+        run: |
+          npm version 0.0.1 --no-git-tag-version --allow-same-version
+          npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Install it silently
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $setup = Get-ChildItem release -Filter "OpenUncensored-Setup-*-win-x64.exe" | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList "/S" -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "OpenUncensored.exe" | Select-Object -First 1
+          if (-not $exe) { throw "app not installed" }
+          "APP_DIR=$($exe.DirectoryName)" | Out-File $env:GITHUB_ENV -Append
+          $latest = gh release view -R ${{ github.repository }} --json tagName --jq '.tagName'
+          Write-Host "latest release $latest"
+          "WANT=$($latest.TrimStart('v'))" | Out-File $env:GITHUB_ENV -Append
+      - name: A downloaded update installs with no click (${{ matrix.mode }})
+        shell: pwsh
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: |
+          npm install --no-save playwright
+          node scripts/auto-update-test.cjs "$env:APP_DIR" "$env:WANT" "$env:RUNNER_TEMP\auto-update" ${{ matrix.mode }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: auto-update-${{ matrix.mode }}
+          path: |
+            ${{ runner.temp }}/auto-update/*.log
+            ${{ runner.temp }}/auto-update/*.png
+          if-no-files-found: warn

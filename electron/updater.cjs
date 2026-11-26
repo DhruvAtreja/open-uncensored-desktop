@@ -25,11 +25,21 @@ const { Readable } = require("node:stream");
 
 const REPO = "DhruvAtreja/open-uncensored-desktop";
 const FEED = process.env.OU_UPDATE_FEED || `https://api.github.com/repos/${REPO}/releases/latest`;
+// A downloaded update also goes in without the click (2026-11-26). Many copies never relaunched, above all
+// on Windows, where closing the window keeps the app in the tray, so they ran one or two versions behind:
+//   * when the app quits, the update is installed and the app is not reopened;
+//   * when nothing is running (no agent task, no chat reply) and the computer has had no keyboard or mouse
+//     input for IDLE_INSTALL_S, the app relaunches into the new version.
+// Not while the computer is shutting down or signing out, which could cut an install short.
+//
 // Every 30 minutes: with 4 hours, a copy left open did not offer a release made that morning until the
 // evening. Two unauthenticated GitHub API calls an hour is far under its 60 an hour per address.
 const CHECK_EVERY_MS = 30 * 60 * 1000;
+const IDLE_INSTALL_S = Number(process.env.OU_UPDATE_IDLE_S) || 15 * 60;
+const IDLE_POLL_MS = Math.min(60_000, IDLE_INSTALL_S * 1000);
 
-let state = { status: "idle" }; // idle | checking | downloading | ready | error
+let state = { status: "idle" }; // idle | checking | downloading | ready | installing | error
+let endingSession = false; // the computer is shutting down or signing out
 let listeners = [];
 let checking = null;
 
@@ -129,16 +139,19 @@ function checkNow() {
   return checking;
 }
 
-function install() {
+// relaunch: reopen the new version (the button, idle) or not (the app is quitting anyway).
+function install({ relaunch = true } = {}) {
   if (state.status !== "ready") return false;
+  const ready = state;
+  set({ ...state, status: "installing" }); // once: the quit that follows must not start it again
   if (IS_WIN) {
     // /S: silent, per-user install over the current one; --force-run: reopen the app afterwards.
-    spawn(state.app, ["/S", "--force-run"], { detached: true, stdio: "ignore" }).unref();
-    app.quit();
+    spawn(ready.app, relaunch ? ["/S", "--force-run"] : ["/S"], { detached: true, stdio: "ignore" }).unref();
+    if (relaunch) app.quit();
     return true;
   }
   const bundle = currentBundle();
-  const next = state.app;
+  const next = ready.app;
   const backup = `${bundle}.old`;
   // The update lands under its own bundle name (OpenUncensored.app since 0.1.8), so a copy installed
   // as "Open Uncensored.app" is replaced by the renamed one rather than keeping the old file name.
@@ -149,34 +162,63 @@ function install() {
     script,
     [
       "#!/bin/sh",
-      'pid="$1"; bundle="$2"; next="$3"; backup="$4"; target="$5"',
+      'pid="$1"; bundle="$2"; next="$3"; backup="$4"; target="$5"; reopen="$6"',
       'while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done',
+      // The slow copy goes next to the app first, so an interrupted one leaves the old app in place;
+      // then two renames swap them.
+      'staged="$target.new"; rm -rf "$staged"',
+      '/usr/bin/ditto "$next" "$staged" || { rm -rf "$staged"; exit 1; }',
       'rm -rf "$backup"',
-      'mv "$bundle" "$backup" || exit 1',
+      'mv "$bundle" "$backup" || { rm -rf "$staged"; exit 1; }',
       '[ "$target" = "$bundle" ] || rm -rf "$target"',
-      'if /usr/bin/ditto "$next" "$target"; then rm -rf "$backup"; else rm -rf "$target"; mv "$backup" "$bundle"; target="$bundle"; fi',
+      'if mv "$staged" "$target"; then rm -rf "$backup"; else rm -rf "$staged"; mv "$backup" "$bundle"; target="$bundle"; fi',
       '/usr/bin/xattr -dr com.apple.quarantine "$target" 2>/dev/null',
       'rm -rf "$(dirname "$next")"',
-      '/usr/bin/open "$target"',
+      '[ "$reopen" = 1 ] && /usr/bin/open "$target"',
       "",
     ].join("\n"),
     { mode: 0o755 },
   );
-  spawn("/bin/sh", [script, String(process.pid), bundle, next, backup, target], { detached: true, stdio: "ignore" }).unref();
-  app.quit();
+  spawn("/bin/sh", [script, String(process.pid), bundle, next, backup, target, relaunch ? "1" : "0"], {
+    detached: true,
+    stdio: "ignore",
+  }).unref();
+  if (relaunch) app.quit();
   return true;
 }
 
-function start() {
+/** The app is quitting: put a downloaded update in place, without reopening (not at shutdown or sign out). */
+function installOnQuit() {
+  if (endingSession || state.status !== "ready") return false;
+  return install({ relaunch: false });
+}
+
+/** The computer is shutting down or signing out: leave a downloaded update for the next quit or idle spell. */
+function sessionEnding() {
+  endingSession = true;
+}
+
+// isBusy(): is an agent task or a chat reply running? Then the app never relaunches by itself.
+function start({ isBusy = () => false } = {}) {
   if (!canSelfUpdate()) return;
   setTimeout(checkNow, 10_000);
   setInterval(checkNow, CHECK_EVERY_MS).unref?.();
+  const { powerMonitor } = require("electron");
+  powerMonitor.on("shutdown", sessionEnding); // Mac and Linux; Windows reports it on the window (main.cjs)
+  setInterval(() => {
+    if (state.status !== "ready" || endingSession || isBusy()) return;
+    if (powerMonitor.getSystemIdleTime() < IDLE_INSTALL_S) return;
+    console.log(`update: idle for ${IDLE_INSTALL_S} s with nothing running, relaunching into ${state.version}`);
+    install({ relaunch: true });
+  }, IDLE_POLL_MS).unref?.();
 }
 
 module.exports = {
   start,
   checkNow,
   install,
+  installOnQuit,
+  sessionEnding,
   getState: () => state,
   onChange: (fn) => {
     listeners.push(fn);

@@ -660,8 +660,14 @@ function createWindow() {
       trayHint();
     });
     // Signing out or shutting down must not be held up by the window refusing to close.
-    win.on("query-session-end", () => (quitting = true));
-    win.on("session-end", () => (quitting = true));
+    win.on("query-session-end", () => {
+      quitting = true;
+      updater.sessionEnding(); // no update install while Windows shuts down or signs out
+    });
+    win.on("session-end", () => {
+      quitting = true;
+      updater.sessionEnding();
+    });
   }
   return win;
 }
@@ -904,7 +910,7 @@ app.whenReady().then(() => {
   installId();
   if (freshInstall) appEvent("app_install");
   appEvent("app_launch");
-  updater.start();
+  updater.start({ isBusy: () => runs.size > 0 || streams.size > 0 });
 });
 // Agent tasks and chat streams report to the window that started them, so they stop when it closes
 // (Mac; the conversation keeps what was done, and sending again carries on) and when the app quits.
@@ -927,4 +933,5 @@ app.on("before-quit", () => {
   quitting = true;
   stopWork();
   flushConversations();
+  updater.installOnQuit(); // a downloaded update goes in now, without reopening the app
 });
