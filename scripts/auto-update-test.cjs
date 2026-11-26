@@ -66,10 +66,18 @@ async function waitFor(test, ms) {
     timeout: 90_000,
   });
   const win = await app.firstWindow();
-  // The updater checks 10 s after launch, then downloads the release.
-  await win.getByText("Relaunch to update").first().waitFor({ state: "visible", timeout: 420_000 });
+  // The updater checks 10 s after launch, then downloads the release. Its state is read the way the
+  // sidebar reads it (window.ou.getUpdate), since a copy with no key shows the key screen, not the sidebar.
+  const t0 = Date.now();
+  let st = {};
+  while (Date.now() - t0 < 420_000) {
+    st = (await win.evaluate(() => window.ou.getUpdate()).catch(() => ({}))) || {};
+    if (st.status === "ready" || st.status === "error") break;
+    await sleep(3000);
+  }
+  if (st.status !== "ready") throw new Error(`update never became ready: ${JSON.stringify(st)}`);
   await win.screenshot({ path: path.join(out, `auto-update-${mode}-ready.png`) }).catch(() => {});
-  log("update downloaded and ready; nothing is clicked");
+  log(`update ${st.version} downloaded and ready after ${Math.round((Date.now() - t0) / 1000)} s; nothing is clicked`);
 
   if (mode === "quit") {
     await app.evaluate(({ app }) => app.quit()).catch(() => {});
